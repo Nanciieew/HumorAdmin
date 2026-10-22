@@ -30,6 +30,8 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
   const [mode, setMode] = useState<"ai" | "manual">("ai");
   const [caption, setCaption] = useState("");
   const [missingOriginal, setMissingOriginal] = useState(false);
+  const [originalLoaded, setOriginalLoaded] = useState(false);
+  const photoLocked = editing && originalLoaded;
   const loadedMedia = useRef<string | null>(null);
   const [reading, setReading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -73,7 +75,7 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
     if (!isUuid(mediaId) || loadedMedia.current === mediaId) return;
     const controller = new AbortController();
     async function load() {
-      setReading(true); setError(""); setSource(null); setResult(null); setPhotoId(""); setConfirmed(false); setMissingOriginal(false);
+      setReading(true); setError(""); setSource(null); setResult(null); setPhotoId(""); setConfirmed(false); setMissingOriginal(false); setOriginalLoaded(false);
       if (!previewScreen) {
         batchId.current = null;
         try { sessionStorage.removeItem(storageKey); } catch { /* Storage is optional. */ }
@@ -87,6 +89,7 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
         loadedMedia.current = mediaId;
         setCaption(data.caption || "");
         setSource(data.image ? { image: data.image, name: "Original meme photo" } : null);
+        setOriginalLoaded(Boolean(data.image));
         setMissingOriginal(!data.image);
       } catch (cause) {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Couldn’t load the original photo.");
@@ -126,6 +129,7 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
     }
   }
   function choosePhoto(file: File | null) {
+    if (photoLocked) return;
     const token = ++version.current; reader.current?.abort();
     setSource(null); setResult(null); setPhotoId(""); setConfirmed(false); setError(""); setReading(false);
     if (!file) return;
@@ -197,7 +201,7 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
     remember(null);
     setCelebrating(false); setSource(null); setResult(null); setPhotoId("");
     setConfirmed(false); setSelected(0); setDirection(""); setError(""); setPublishError(""); setRecoverable(false);
-    setCaption(""); setMode("ai"); setMissingOriginal(false); loadedMedia.current = null;
+    setCaption(""); setMode("ai"); setMissingOriginal(false); setOriginalLoaded(false); loadedMedia.current = null;
     router.push("/disguise", { scroll: false });
   }
   const locked = busy || publishing;
@@ -208,13 +212,13 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
   const errorPanel = error && <div role="alert" className={styles.error}><span>{error}</span>{recoverable && !busy && <button onClick={() => { if (batchId.current) void restore(batchId.current); }}>Try loading again</button>}</div>;
   return <main id="main" data-factory-screen={previewScreen ? "preview" : "upload"} className={styles.factory}>
     <div className={styles.topbar}><span className={styles.topbarMark} aria-hidden="true">⌁</span><span>Checked <b>Factory</b></span></div>
-    {(busy || publishing) && <FactoryModal label={publishing ? "Publishing your meme" : generating ? "Creating your memes" : "Loading your memes"} onClose={generating ? () => void cancel() : undefined}>
-      <LabLoader /><p className={styles.modalTitle} role="status">{publishing ? "Publishing your meme…" : generating ? "Creating your memes…" : "Loading your memes…"}</p>
+    {(busy || publishing) && <FactoryModal label={publishing ? changingCaption ? "Saving your meme" : "Publishing your meme" : generating ? "Creating your memes" : "Loading your memes"} onClose={generating ? () => void cancel() : undefined}>
+      <LabLoader /><p className={styles.modalTitle} role="status">{publishing ? changingCaption ? "Saving your meme…" : "Publishing your meme…" : generating ? "Creating your memes…" : "Loading your memes…"}</p>
       {generating && <button className={styles.cancelGeneration} onClick={() => void cancel()}>Cancel</button>}
     </FactoryModal>}
-    {celebrating && <FactoryModal label={changingCaption ? "Caption saved" : "Meme published"} onClose={() => setCelebrating(false)}>
+    {celebrating && <FactoryModal label={changingCaption ? "Meme saved" : "Meme published"} onClose={() => setCelebrating(false)}>
       <button className={styles.closeModal} aria-label="Close success window" onClick={() => setCelebrating(false)}>×</button>
-      <div className={styles.checkedStamp} role="status" aria-label={changingCaption ? "Caption saved. CHECKED" : "Meme published. CHECKED"}>
+      <div className={styles.checkedStamp} role="status" aria-label={changingCaption ? "Meme saved. CHECKED" : "Meme published. CHECKED"}>
         <div className={styles.checkHalo} aria-hidden="true"><svg viewBox="0 0 140 140" fill="none"><circle className={styles.checkRing} cx="70" cy="70" r="60" /><circle className={styles.checkTicks} cx="70" cy="70" r="53"/><path className={styles.checkStroke} pathLength="1" d="m39 71 21 22 43-47" /></svg></div>
         <span>CHECKED</span>
       </div>
@@ -241,7 +245,7 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
           {result ? <div className={styles.options} style={{ gridTemplateRows: `repeat(${result.variants.length}, minmax(0, 1fr))` }} role="group" aria-label="Choose a caption">{result.variants.map((option, index) => <button key={index} className={styles.option} aria-pressed={selected === index} disabled={locked || confirmed || !!photoId} onClick={() => setSelected(index)}><span className={styles.number}>{String(index + 1).padStart(2, "0")}</span><span>{option.caption}</span><span className={styles.selected} aria-hidden="true">{selected === index ? "✓" : ""}</span></button>)}</div> : <div className={styles.placeholders} aria-label="Captions are being created">{Array.from({ length: 5 }, (_, index) => <div key={index}><span>{String(index + 1).padStart(2, "0")}</span><i /></div>)}</div>}
           <div className={styles.publish}>
             {publishError && <p role="alert" className={styles.error}>{publishError}</p>}
-            {photoId ? !celebrating && <div className={styles.publishedActions}><button className={styles.createAnother} onClick={createAnother}>Create Another Meme</button>{destination && <a className={styles.primary} href={destination}>{destinationLabel}<span aria-hidden="true">↗</span></a>}</div> : <button className={styles.primary} disabled={!result || locked} onClick={() => void publish()}>{publishing ? "Publishing…" : confirmed ? "Retry publishing" : result?.mediaId || editing ? "Save caption" : "Publish to gallery"}<span aria-hidden="true">→</span></button>}
+            {photoId ? !celebrating && <div className={styles.publishedActions}><button className={styles.createAnother} onClick={createAnother}>Create Another Meme</button>{destination && <a className={styles.primary} href={destination}>{destinationLabel}<span aria-hidden="true">↗</span></a>}</div> : <button className={styles.primary} disabled={!result || locked} onClick={() => void publish()}>{publishing ? changingCaption ? "Saving…" : "Publishing…" : confirmed ? changingCaption ? "Retry saving" : "Retry publishing" : changingCaption ? "Save Meme" : "Publish to gallery"}<span aria-hidden="true">→</span></button>}
           </div>
         </section>
       </div>
@@ -249,16 +253,21 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
       <header className={styles.hero}><h1>{editing ? "Change your caption" : "Make it a meme"}<span>.</span></h1><span className={styles.microcopy}>TURN MOMENTS<br />INTO MEMES</span></header>
       {missingOriginal && <p className={styles.sourceNotice}>The original photo wasn’t saved for this meme. Upload the photo without captions to continue.</p>}
       <div className={`${styles.dropzone} ${dragging ? styles.dragging : ""}`} role="group" aria-label="Photo upload"
-        onDragOver={event => { event.preventDefault(); if (!locked) setDragging(true); }}
+        onDragOver={event => { event.preventDefault(); if (!locked && !photoLocked) setDragging(true); }}
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
-        onDrop={event => { event.preventDefault(); setDragging(false); if (!locked && !reading) choosePhoto(event.dataTransfer.files[0] ?? null); }}>
-        <input ref={fileInput} type="file" accept="image/jpeg,image/png" aria-label="Choose meme picture" className={styles.fileInput} disabled={locked || reading} onChange={event => { choosePhoto(event.target.files?.[0] ?? null); event.target.value = ""; }} />
+        onDrop={event => { event.preventDefault(); setDragging(false); if (!locked && !reading && !photoLocked) choosePhoto(event.dataTransfer.files[0] ?? null); }}>
+        <input ref={fileInput} type="file" accept="image/jpeg,image/png" aria-label="Choose meme picture" className={styles.fileInput} disabled={locked || reading || photoLocked} onChange={event => { choosePhoto(event.target.files?.[0] ?? null); event.target.value = ""; }} />
+        {photoLocked && source ? <div className={styles.dropButton}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- Original photos use authenticated storage. */}
+          <img src={source.image} alt="Original meme photo" /><span className={styles.replace}>Original photo</span>
+        </div> : <>
         <button className={styles.dropButton} type="button" disabled={locked || reading} onClick={() => fileInput.current?.click()} aria-label={source ? "Replace photo" : "Upload photo"}>
           {source ? <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={source.image} alt="Your uploaded meme picture" /><span className={styles.replace}>Replace photo ↗</span>
           </> : <><span className={styles.uploadIcon} aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><rect x="4" y="5" width="24" height="22" rx="4" stroke="currentColor" strokeWidth="1.5" /><circle cx="12" cy="12" r="2" fill="currentColor" /><path d="m5 23 7-7 5 5 4-4 6 6M23 3v8m-4-4 4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>{reading ? "Reading your photo…" : dragging ? "Drop it here" : "Upload or drag a photo"}</strong><span className={styles.fileHelp}>JPG or PNG · 2 MB max</span></>}
         </button>
+        </>}
       </div>
       <div className={styles.modeChoice} role="group" aria-label="Caption method"><button type="button" aria-pressed={mode === "manual"} disabled={locked} onClick={() => setMode("manual")}>Write my own caption</button><button type="button" aria-pressed={mode === "ai"} disabled={locked} onClick={() => setMode("ai")}>Generate with AI</button></div>
       <div className={styles.uploadActions}><div className={styles.keyword}>{mode === "manual" ? <><label htmlFor="factory-caption">Your caption</label><textarea id="factory-caption" maxLength={180} rows={2} placeholder="Write your caption…" value={caption} disabled={locked} onChange={event => setCaption(event.target.value)} /></> : <><label htmlFor="factory-direction">Keyword <span>(optional)</span></label><input id="factory-direction" maxLength={500} placeholder="Finals week, first dates, office life…" value={direction} disabled={locked} onChange={event => setDirection(event.target.value)} /></>}</div>

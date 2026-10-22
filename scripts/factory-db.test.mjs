@@ -32,3 +32,14 @@ test('original retention adds JPG and PNG without changing private-bucket limits
   assert.deepEqual((await db.query("select allowed_mime_types from storage.buckets where id='other'")).rows[0].allowed_mime_types,['image/gif']);
  } finally {await db.close();}
 });
+
+test('shared original links can be installed again without changing existing links or media rows',async()=>{
+ const db=new PGlite();
+ try {
+  await db.exec("create table images(id int primary key,original_storage_path text); insert into images values (1,'owner/original.png'),(2,null); create table factory_batches(id int primary key); insert into factory_batches values (1);");
+  const migration=await readFile(new URL('../supabase/migrations/20261022000001_link_factory_originals.sql',import.meta.url),'utf8');
+  await db.exec(migration);await db.exec(migration);
+  assert.deepEqual((await db.query('select * from images order by id')).rows,[{id:1,original_storage_path:'owner/original.png'},{id:2,original_storage_path:null}]);
+  assert.deepEqual((await db.query('select * from factory_batches')).rows,[{id:1,original_storage_path:null}]);
+ } finally {await db.close();}
+});

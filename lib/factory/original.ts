@@ -18,11 +18,13 @@ export async function originalDataUrl(file: Blob) {
   return `data:image/${meta.format};base64,${bytes.toString("base64")}`;
 }
 
-export async function retainFactoryOriginal(userId: string, batchId: string, ownerId: string, mediaId: string, required = false) {
+export async function retainFactoryOriginal(userId: string, batchId: string, ownerId: string, mediaId: string, required = false,
+  paths: { source?: string; target?: string } = {}) {
   const bucket = supabase.storage.from("generated-images");
-  const retained = await bucket.download(originalPath(ownerId, mediaId));
+  const target = paths.target ?? originalPath(ownerId, mediaId);
+  const retained = await bucket.download(target);
   if (retained.data && !retained.error) return;
-  const original = await bucket.download(batchOriginalPath(userId, batchId));
+  const original = await bucket.download(paths.source ?? batchOriginalPath(userId, batchId));
   // Older batches predate original retention and can still finish publishing.
   if (original.error || !original.data) {
     if (required) throw new ImageGenerationError("Couldn’t load the original photo. Please retry.", 503);
@@ -30,9 +32,9 @@ export async function retainFactoryOriginal(userId: string, batchId: string, own
   }
   const bytes = Buffer.from(await original.data.arrayBuffer());
   const meta = await sharp(bytes).metadata();
-  const saved = await bucket.upload(originalPath(ownerId, mediaId), bytes, { contentType: `image/${meta.format}`, upsert: false });
+  const saved = await bucket.upload(target, bytes, { contentType: `image/${meta.format}`, upsert: false });
   if (saved.error) {
-    const winner = await bucket.download(originalPath(ownerId, mediaId));
+    const winner = await bucket.download(target);
     if (winner.error || !winner.data) throw new ImageGenerationError("Couldn’t retain the original photo. Please retry.", 503);
   }
 }

@@ -16,7 +16,9 @@ try {
  if(!buckets.length)throw new Error('The private generated-images bucket must be installed first.');
  const mime=buckets[0].allowed_mime_types;
  const originalsReady=mime===null||['image/jpeg','image/png'].every(type=>mime.includes(type));
- if(rows[0].batches&&originalsReady){console.log('Factory schema and original-photo storage are already configured.');process.exit(0);}
+ const columns=await query("select table_name from information_schema.columns where table_schema='public' and table_name in ('images','factory_batches') and column_name='original_storage_path'");
+ const linksReady=columns.length===2;
+ if(rows[0].batches&&originalsReady&&linksReady){console.log('Factory schema, original-photo links and storage are already configured.');process.exit(0);}
  if(!process.argv.includes('--apply')){console.log('Ready to configure Factory batches and original JPG/PNG retention. Run with --apply to install the missing configuration.');process.exit(0);}
  if(!rows[0].batches){
   const sql=await readFile(new URL('../supabase/migrations/20261019000000_factory_batches.sql',import.meta.url),'utf8');
@@ -24,6 +26,10 @@ try {
  }
  if(!originalsReady){
   const sql=await readFile(new URL('../supabase/migrations/20261022000000_retain_factory_originals.sql',import.meta.url),'utf8');
+  await query(sql,false);
+ }
+ if(!linksReady){
+  const sql=await readFile(new URL('../supabase/migrations/20261022000001_link_factory_originals.sql',import.meta.url),'utf8');
   await query(sql,false);
  }
  console.log('Factory configuration installed. Existing images, owners and votes were preserved.');

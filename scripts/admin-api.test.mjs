@@ -79,7 +79,7 @@ const context = () => ({ params: Promise.resolve({ id }) });
 const request = (path, method = 'GET', body, origin = 'https://app.test') => new Request(`https://app.test${path}`, {
   method, headers: { origin, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
-const seed = () => { const row = { id, contributor_id: ownerId, source: 'generated', private_storage_path: `${ownerId}/${id}.webp`, public_storage_path: null, published_at: null, title: 'Before', description: 'Original' }; rows.set(id, row); objects.set(`generated-images/${row.private_storage_path}`, png); return row; };
+const seed = () => { const row = { id, contributor_id: ownerId, source: 'generated', private_storage_path: `${ownerId}/${id}.webp`, public_storage_path: null, published_at: null, original_storage_path: null, title: 'Before', description: 'Original' }; rows.set(id, row); objects.set(`generated-images/${row.private_storage_path}`, png); return row; };
 
 test('all entry points deny anonymous, non-admin, missing-profile, non-Google, revoked, and failed permission lookups before privileged work', async () => {
   const endpoints = [
@@ -231,7 +231,7 @@ test('changing a caption switches the rendered image and text together while ret
     assert.equal(row.published_at,'2026-10-20T12:00:00Z');assert.equal(row.description,'New caption');
     assert.deepEqual(objects.get(`gallery-photos/${row.public_storage_path}`),png);
     assert.equal(row.private_storage_path,source==='generated'?`${ownerId}/recaption/${batchId}.webp`:null);
-    assert.deepEqual(objects.get(`generated-images/${ownerId}/originals/${batchId}`),png);
+    assert.deepEqual(objects.get(`generated-images/${ownerId}/originals/${id}`),png);
     assert.equal((await loadRecaptionSource(id)).image,`data:image/png;base64,${png.toString('base64')}`);
     assert.equal(await replaceMediaCaption(batch,0),id,'a retry keeps the same media record');
   }
@@ -247,4 +247,40 @@ test('private caption changes stay private, and stale editors or revoked admins 
   const stale={...batch,id:randomUUID()};
   await assert.rejects(replaceMediaCaption(stale,0),error=>error.status===409);
   assert.equal(row.description,'New caption');
+});
+
+test('the shared original_storage_path takes precedence and its file and link stay unchanged across caption saves',async()=>{
+ const row=seed(),batchId=randomUUID();
+ const original=await sharp({create:{width:40,height:40,channels:3,background:'#22aa33'}}).png().toBuffer();
+ row.original_storage_path=`${ownerId}/factory/${id}/original.png`;
+ objects.set(`generated-images/${row.original_storage_path}`,original);
+ // A former filename lookup must not override the authoritative shared link.
+ objects.set(`generated-images/${ownerId}/originals/${id}`,png);
+ const response=await originalRoute.GET(request(`/api/admin/media/${id}/original`),context());
+ assert.equal((await response.json()).image,`data:image/png;base64,${original.toString('base64')}`);
+ const target=await recaptionTarget(id),path=`${adminId}/factory/${batchId}/0.webp`;
+ objects.set(`generated-images/${path}`,png);
+ objects.set(`generated-images/${adminId}/factory/${batchId}/original`,png);
+ const beforePath=row.original_storage_path,beforeFile=objects.get(`generated-images/${beforePath}`);
+ const batch={id:batchId,user_id:adminId,variants:[{caption:'Changed caption',path,replaces:target,originalSaved:true}]};
+ await replaceMediaCaption(batch,0);await replaceMediaCaption(batch,0);
+ assert.equal(row.original_storage_path,beforePath);
+ assert.equal(objects.get(`generated-images/${beforePath}`),beforeFile,'the existing original must not be rewritten');
+ assert.deepEqual(beforeFile,original);assert.equal(row.description,'Changed caption');
+ assert.equal((await loadRecaptionSource(id)).image,`data:image/png;base64,${original.toString('base64')}`);
+});
+
+test('broken, foreign and changed original links fail without loading a captioned fallback or saving an edit',async()=>{
+ const row=seed();row.original_storage_path=`${ownerId}/factory/${id}/original.png`;
+ await assert.rejects(loadRecaptionSource(id),error=>error.status===503);
+ row.original_storage_path=`${adminId}/factory/${id}/original.png`;
+ await assert.rejects(loadRecaptionSource(id),error=>error.status===503);
+ row.original_storage_path=row.private_storage_path;
+ await assert.rejects(loadRecaptionSource(id),error=>error.status===503);
+ row.original_storage_path=`${ownerId}/first-original.png`;
+ const target=await recaptionTarget(id);
+ row.original_storage_path=`${ownerId}/another-original.png`;
+ const batch={id:randomUUID(),user_id:adminId,variants:[{caption:'Changed',path:'unused',replaces:target}]};
+ await assert.rejects(replaceMediaCaption(batch,0),error=>error.status===409);
+ assert.equal(row.description,'Original');
 });

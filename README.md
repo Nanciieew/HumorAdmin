@@ -53,12 +53,14 @@ Checkboard also refresh on focus and every 15 seconds. Cross-project invalidatio
 is therefore based on fresh reads, without an anonymous revalidation endpoint.
 
 Media shows a single caption and opens `/disguise?media=<id>` to change it.
-Factory reloads the retained original photo and offers a manual caption or the
-existing five AI captions. Saving replaces the same media record and rendered
+Factory reads the shared `images.original_storage_path` link, loads that photo
+into the upload area, and offers a manual caption or the existing five AI captions.
+Save Meme replaces the same media record and rendered
 bytes, preserving its owner, votes, dates and publication status. Old media whose
 caption-free originals were never retained require an original-photo upload.
-Originals remain private and survive preview cleanup; edited versions retain
-their own original so changing the source photo also works on subsequent edits.
+Originals remain private and survive preview cleanup. Caption edits preserve the
+linked original file and its path; subsequent edits reuse that same photo.
+Older admin media without an explicit link still use the retained-original lookup.
 
 Before deploying this caption workflow, enable JPG/PNG retention in the existing
 private bucket with the trusted local maintenance command:

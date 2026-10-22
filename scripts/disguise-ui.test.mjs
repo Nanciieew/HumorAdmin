@@ -145,16 +145,20 @@ test('Media edits automatically load the original and save the selected caption 
   return Response.json(url==='/api/factory'?{...preview,mediaId}:{photoId:mediaId});
  };
  const ui=setup({path:`/disguise?media=${mediaId}`});
- await waitFor(()=>assert.ok(ui.getByAltText('Your uploaded meme picture')));
+ await waitFor(()=>assert.ok(ui.getByAltText('Original meme photo')));
+ assert.equal(ui.getByLabelText('Choose meme picture').disabled,true);
+ assert.equal(ui.queryByRole('button',{name:'Replace photo'}),null);
+ fireEvent.drop(ui.getByRole('group',{name:'Photo upload'}),{dataTransfer:{files:[new dom.window.File(['other'],'other.png',{type:'image/png'})]}});
+ assert.equal(ui.getByAltText('Original meme photo').getAttribute('src'),'data:image/png;base64,AA==');
  assert.equal(calls.length,1);assert.equal(calls[0].url,`/api/admin/media/${mediaId}/original`);
  fireEvent.click(ui.getByRole('button',{name:'Write my own caption'}));assert.equal(ui.getByLabelText('Your caption').value,'Existing joke');
  fireEvent.click(ui.getByRole('button',{name:'Generate with AI'}));
  await generate(ui);
  assert.equal(JSON.parse(calls[1].options.body).mediaId,mediaId);
- fireEvent.click(ui.getByRole('button',{name:'Save caption'}));
+ fireEvent.click(ui.getByRole('button',{name:'Save Meme'}));
  await waitFor(()=>assert.ok(ui.getByRole('link',{name:'Back to Media'})));
  assert.equal(ui.getByRole('link',{name:'Back to Media'}).getAttribute('href'),'/admin/media');
- assert.ok(ui.getByRole('status',{name:'Caption saved. CHECKED'}));
+ assert.ok(ui.getByRole('status',{name:'Meme saved. CHECKED'}));
 });
 
 test('legacy memes ask for the caption-free original rather than loading the flattened meme',async()=>{

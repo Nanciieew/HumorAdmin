@@ -28,7 +28,7 @@ class Query {
   let rows=[...this.rows.values()].filter(row=>this.filters.every(fn=>fn(row))).slice(0,this.count);
   if(this.op==='insert'){
    if(this.rows.has(this.values.id)||(this.table==='factory_batches'&&[...this.rows.values()].some(row=>row.user_id===this.values.user_id&&row.state==='generating')))return{data:null,error:{code:'23505'}};
-   const row=this.table==='factory_batches'?{state:'generating',variants:[],selected:null,lease_until:null,cleaned_at:null,created_at:new Date().toISOString(),expires_at:new Date(Date.now()+86400000).toISOString(),...this.values}:{published_at:null,created_at:new Date().toISOString(),...this.values};
+   const row=this.table==='factory_batches'?{state:'generating',variants:[],selected:null,lease_until:null,cleaned_at:null,created_at:new Date().toISOString(),expires_at:new Date(Date.now()+86400000).toISOString(),...this.values}:{published_at:null,original_storage_path:null,created_at:new Date().toISOString(),...this.values};
    this.rows.set(row.id,row);rows=[row];
   } else if(this.op==='update')for(const row of rows)Object.assign(row,this.values);
   else if(this.op==='delete')for(const row of rows)this.rows.delete(row.id);
@@ -121,10 +121,10 @@ test('manual captions render and publish one variant without a configured AI pro
   await assert.rejects(publishFactoryBatch(owner,id,1),/not ready/);
   assert.equal((await publishFactoryBatch(owner,id,0)).photoId,id);
   assert.equal(tables.images.get(id).description,caption);
-  assert.deepEqual(objects.get(`generated-images/${owner}/originals/${id}`),bytes);
+  assert.deepEqual(objects.get(`generated-images/${tables.images.get(id).original_storage_path}`),bytes);
   for(const row of tables.factory_batches.values())row.expires_at='2000-01-01T00:00:00Z';
   await cleanupFactoryBatches();
-  assert.deepEqual(objects.get(`generated-images/${owner}/originals/${id}`),bytes);
+  assert.deepEqual(objects.get(`generated-images/${tables.images.get(id).original_storage_path}`),bytes);
  } finally {process.env.GEMINI_API_KEY=key;process.env.GEMINI_MODEL=model;}
 });
 
@@ -137,7 +137,7 @@ test('invalid manual captions fail without provider calls or retained uploads',a
 
 test('Media caption batches update the original record, survive cleanup retries, and retain the original for its owner',async()=>{
  const mediaId=randomUUID(),mediaOwner=randomUUID(),caption='Me leaving the group chat';
- const row={id:mediaId,contributor_id:mediaOwner,source:'generated',private_storage_path:`${mediaOwner}/before.webp`,public_storage_path:`${mediaOwner}/before-public.webp`,published_at:'2026-01-01T00:00:00Z',title:'Old caption',description:'Old caption',upvotes:'9',downvotes:'2'};
+ const row={id:mediaId,contributor_id:mediaOwner,source:'generated',private_storage_path:`${mediaOwner}/before.webp`,public_storage_path:`${mediaOwner}/before-public.webp`,published_at:'2026-01-01T00:00:00Z',original_storage_path:null,title:'Old caption',description:'Old caption',upvotes:'9',downvotes:'2'};
  tables.images.set(mediaId,row);
  const id=randomUUID();
  const batch=await generateFactoryBatch(owner,{id,image,direction:'',mode:'manual',caption,approved:true,mediaId});
@@ -149,12 +149,39 @@ test('Media caption batches update the original record, survive cleanup retries,
  assert.equal((await publishFactoryBatch(owner,id,0)).photoId,mediaId);
  assert.equal((await previewFactoryBatch(await readFactoryBatch(owner,id))).photoId,mediaId);
  assert.equal(tables.images.size,1);
- assert.deepEqual(objects.get(`generated-images/${mediaOwner}/originals/${id}`),bytes);
+ assert.deepEqual(objects.get(`generated-images/${mediaOwner}/originals/${mediaId}`),bytes);
  const kept=objects.get(`generated-images/${row.private_storage_path}`);
  assert.deepEqual(kept,objects.get(`gallery-photos/${row.public_storage_path}`));
  for(const batch of tables.factory_batches.values())batch.expires_at='2000-01-01T00:00:00Z';
  await cleanupFactoryBatches();
  assert.equal(tables.factory_batches.size,0);assert.equal(tables.images.size,1);
  assert.deepEqual(objects.get(`generated-images/${row.private_storage_path}`),kept);
- assert.deepEqual(objects.get(`generated-images/${mediaOwner}/originals/${id}`),bytes);
+ assert.deepEqual(objects.get(`generated-images/${mediaOwner}/originals/${mediaId}`),bytes);
+});
+
+test('shared Humor Project originals drive regenerated memes and survive repeated edits and both projects’ preview cleanup',async()=>{
+ const mediaId=randomUUID(),mediaOwner=randomUUID(),sourcePath=`${mediaOwner}/factory/${mediaId}/original.jpg`;
+ const original=await sharp({create:{width:400,height:300,channels:3,background:'#229933'}}).jpeg().toBuffer();
+ const row={id:mediaId,contributor_id:mediaOwner,source:'generated',private_storage_path:factoryPath(mediaOwner,mediaId,0),public_storage_path:`${mediaOwner}/old-public.webp`,original_storage_path:sourcePath,published_at:'2026-01-01T00:00:00Z',title:'Old joke',description:'Old joke',upvotes:'9',downvotes:'2'};
+ tables.images.set(mediaId,row);objects.set(`generated-images/${sourcePath}`,original);
+ const storedOriginal=objects.get(`generated-images/${sourcePath}`);
+ tables.factory_batches.set(mediaId,{id:mediaId,user_id:mediaOwner,state:'published',variants:[{caption:'Old joke',path:row.private_storage_path}],selected:0,lease_until:null,original_storage_path:sourcePath,expires_at:new Date(Date.now()+86400000).toISOString()});
+ for(const mode of ['ai','manual']) {
+  const caption=mode==='ai'?captions[0]:'Me leaving the group chat';
+  const id=randomUUID();
+  const result=await generateFactoryBatch(owner,{id,image,direction:'',mode,caption,approved:true,mediaId});
+  assert.equal(result.mediaId,mediaId);
+  if(mode==='ai')assert.equal(requests.at(-1).body.contents[0].parts[1].inlineData.data,original.toString('base64'));
+  const rendered=objects.get(`generated-images/${factoryPath(owner,id,0)}`);
+  const decoded=await sharp(rendered).ensureAlpha().raw().toBuffer(),source=await sharp(original).ensureAlpha().raw().toBuffer();
+  assert.deepEqual(decoded.subarray(0,400*200*4),source.subarray(0,400*200*4),'render from the stored original, ignoring a different client-supplied photo');
+  assert.equal((await publishFactoryBatch(owner,id,0)).photoId,mediaId);
+  assert.equal(row.original_storage_path,sourcePath);assert.equal(row.contributor_id,mediaOwner);assert.equal(row.upvotes,'9');assert.equal(row.downvotes,'2');
+  assert.equal(objects.get(`generated-images/${sourcePath}`),storedOriginal);
+ }
+ for(const batch of tables.factory_batches.values())batch.expires_at='2000-01-01T00:00:00Z';
+ await cleanupFactoryBatches();
+ assert.equal(tables.images.size,1);assert.equal(row.original_storage_path,sourcePath);
+ assert.equal(objects.get(`generated-images/${sourcePath}`),storedOriginal);
+ assert.deepEqual(storedOriginal,original);
 });
