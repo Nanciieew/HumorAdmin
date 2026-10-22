@@ -28,9 +28,10 @@ Set `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`,
 `USER_SITE_URL` in Vercel Production. The example documents their purposes.
 `SUPABASE_ACCESS_TOKEN` is only for trusted local maintenance; never deploy it.
 
-`USER_SITE_URL` points to `https://thehumorproject-five.vercel.app`. Gallery,
-Checkboard and other user-site destinations use uncached temporary redirects to
-that deployment. Each deployment has its own browser session. The original site
+`USER_SITE_URL` points to `https://thehumorproject-five.vercel.app`. Checkboard and other remaining user-site destinations use uncached temporary
+redirects to that deployment. The admin app has no Gallery page or Gallery
+navigation. Factory publication links open the original Gallery directly. The
+Control room Media page manages saved records without a media-creation form. Each deployment has its own browser session. The original site
 reads Supabase per request without a persistent Next data cache; Gallery and
 Checkboard also refresh on focus and every 15 seconds. Cross-project invalidation
 is therefore based on fresh reads, without an anonymous revalidation endpoint.

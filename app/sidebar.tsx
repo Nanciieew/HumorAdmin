@@ -27,7 +27,7 @@ export function Sidebar({ children, isAdmin = false }: { children?: ReactNode; i
         <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /><path d={collapsed ? "m13 9 3 3-3 3" : "m16 9-3 3 3 3"} /></svg>
       </button>
     </div>
-    <nav aria-label="Main navigation" className="sidebar-links">{[...(isAdmin ? [{ href: "/admin", label: "Control room", icon: "grid" as const }] : []), ...links, { href: "/gallery", label: "Checked Gallery ↗", icon: "grid" as const }].map((link) => {
+    <nav aria-label="Main navigation" className="sidebar-links">{[...(isAdmin ? [{ href: "/admin", label: "Control room", icon: "grid" as const }] : []), ...links].map((link) => {
       const active = link.href === "/" ? (pathname === "/" || pathname === "/quest") : pathname === link.href || pathname.startsWith(`${link.href}/`) || (link.href === "/my-works" && pathname.startsWith("/quest"));
       return <Link key={link.href} href={link.href} aria-label={link.label} title={collapsed ? link.label : undefined} aria-current={active ? "page" : undefined} className={active ? "active" : ""}><Icon name={link.icon} /><span>{link.label}</span><span className="nav-arrow" aria-hidden="true">↗</span></Link>;
     })}</nav>

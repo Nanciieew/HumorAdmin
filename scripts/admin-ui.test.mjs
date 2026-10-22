@@ -15,7 +15,7 @@ const admin = { id: '10000000-0000-4000-8000-000000000001', email: 'admin@exampl
 const media = { id: '20000000-0000-4000-8000-000000000001', contributor_id: admin.id, owner_name: 'Owner', source: 'generated', title: 'A meme', description: 'A caption', created_at: '2026-10-20T12:00:00Z', published_at: null, upvotes: '9', downvotes: '2' };
 let refreshed = 0, pushed = [];
 function mount(section='media',items=[media],total=String(items.length),params='') {
-  return render(React.createElement(AppRouterContext.Provider,{value:{refresh(){refreshed++;},push(path){pushed.push(path);},replace(){},prefetch(){},back(){},forward(){}}},React.createElement(AdminConsole,{section,admin,data:{items,total},params})));
+  return render(React.createElement(AppRouterContext.Provider,{value:{refresh(){refreshed++;},push(path){pushed.push(path);},replace(){},prefetch(){},back(){},forward(){}}},React.createElement(AdminConsole,{section,data:{items,total},params})));
 }
 afterEach(async()=>{await act(async()=>{});cleanup();globalThis.fetch=originalFetch;refreshed=0;pushed=[];});
 test('users and ratings remain read-only, include pending accounts and page through records',()=>{
@@ -29,7 +29,7 @@ test('users and ratings remain read-only, include pending accounts and page thro
 });
 test('media previews use protected endpoints and caption saves submit only editable fields',async()=>{
   const calls=[];globalThis.fetch=async(url,options)=>{calls.push({url,options});return Response.json({id:media.id});};
-  const ui=mount();assert.equal(ui.getByRole('img').getAttribute('src'),`/api/admin/media/${media.id}/preview`);
+  const ui=mount();assert.equal(ui.queryByText('Create media'),null);assert.equal(ui.getByRole('img').getAttribute('src'),`/api/admin/media/${media.id}/preview`);
   fireEvent.change(ui.getByLabelText(`Title for ${media.id}`),{target:{value:'Edited meme'}});
   await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Save captions'}));});
   assert.equal(refreshed,1);
@@ -49,21 +49,6 @@ test('sales conflicts keep the deletion dialog open and show the server error',a
   const ui=mount();fireEvent.click(ui.getByRole('button',{name:'Delete'}));fireEvent.click(ui.getByRole('button',{name:'Permanently delete'}));
   await waitFor(()=>assert.ok(ui.getAllByText('Media with existing sales cannot be deleted.').length));
   assert.ok(ui.getByRole('alertdialog'));assert.equal(refreshed,0);
-});
-test('creation searches completed owners, supports AI generation, and defaults to private',async()=>{
-  const owner={...admin,id:'10000000-0000-4000-8000-000000000002',email:'other@example.com',first_name:'Other',last_name:'Owner'};
-  const calls=[];globalThis.fetch=async(url,options)=>{calls.push({url,options});return Response.json(String(url).startsWith('/api/admin/users')?{items:[owner],total:'1'}:{id:media.id});};
-  const ui=mount();fireEvent.click(ui.getByText('Create media'));
-  fireEvent.change(ui.getByLabelText('Find another owner'),{target:{value:'other'}});fireEvent.click(ui.getByRole('button',{name:'Find owner'}));
-  await waitFor(()=>assert.ok(ui.getByRole('option',{name:/other@example.com/})));
-  assert.match(calls[0].url,/completed=true/);
-  fireEvent.change(ui.getByLabelText('Owner'),{target:{value:owner.id}});
-  fireEvent.change(ui.getByLabelText('Create with'),{target:{value:'generate'}});
-  fireEvent.change(ui.getByLabelText('Generation prompt'),{target:{value:'A funny robot'}});
-  fireEvent.submit(ui.getByRole('form',{name:'Create media'}));
-  await waitFor(()=>assert.equal(refreshed,1));
-  assert.equal(calls[1].url,'/api/admin/media/generate');assert.deepEqual(JSON.parse(calls[1].options.body),{owner:owner.id,title:'',description:'',prompt:'A funny robot'});
-  assert.ok(ui.getByText('Generated image saved privately. Publish it when ready.'));
 });
 test('publishing uses its explicit action; expired sessions return to Google login',async()=>{
   let count=0;globalThis.fetch=async()=>{count++;return count===1?Response.json({id:media.id}):Response.json({error:'Sign in with Google to continue.'},{status:401});};

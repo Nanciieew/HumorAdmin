@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 // User-facing pages remain on the original deployment. A full navigation also
 // gets a fresh server read instead of a prefetched page from this deployment.
-const destinations = new Set(["gallery", "my-works", "leaderboard", "you-are-a-joke", "quest"]);
+const destinations = new Set(["my-works", "leaderboard", "you-are-a-joke", "quest"]);
 
 export async function GET(request: Request, { params }: { params: Promise<{ userPath: string[] }> }) {
   const { userPath } = await params;

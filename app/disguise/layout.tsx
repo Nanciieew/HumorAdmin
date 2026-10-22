@@ -7,7 +7,8 @@ import { PageLoading } from "../loading-indicator";
 async function FactorySession({ children }: { children: ReactNode }) {
   const viewer = await getViewer();
   if (!viewer) redirect("/login?next=/disguise");
-  return <>{children}<DisguiseStudio userId={viewer.user.id} configured={Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_MODEL)} /></>;
+  const galleryUrl = process.env.USER_SITE_URL ? new URL("/gallery", process.env.USER_SITE_URL).href : undefined;
+  return <>{children}<DisguiseStudio galleryUrl={galleryUrl} userId={viewer.user.id} configured={Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_MODEL)} /></>;
 }
 
 export default function FactoryLayout({ children }: { children: ReactNode }) {

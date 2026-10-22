@@ -21,7 +21,7 @@ function setup({configured=true,path='/disguise'}={}){
  function Harness(){
   const [pathname,setPathname]=React.useState(path);
   const router=React.useMemo(()=>({push:setPathname,replace:setPathname}),[]);
-  return React.createElement(AppRouterContext.Provider,{value:router},React.createElement(PathnameContext.Provider,{value:pathname},React.createElement(DisguiseStudio,{configured,userId:'tester'})));
+  return React.createElement(AppRouterContext.Provider,{value:router},React.createElement(PathnameContext.Provider,{value:pathname},React.createElement(DisguiseStudio,{configured,userId:'tester',galleryUrl:'https://original.example/gallery'})));
  }
  return render(React.createElement(Harness));
 }
@@ -54,7 +54,7 @@ test('Publish to gallery confirms the selected caption, locks selection, and rep
  assert.equal(ui.queryByText('Published. This one’s a keeper.'),null);
  assert.ok(ui.getByRole('status',{name:'Meme published. CHECKED'}));
  assert.equal(ui.getByRole('button',{name:/04\s*Caption 4/}).disabled,true);
- assert.equal(ui.getByRole('link',{name:'View in gallery'}).getAttribute('href'),`/gallery?sort=newest#photo-${id}`);
+ assert.equal(ui.getByRole('link',{name:'View in gallery'}).getAttribute('href'),`https://original.example/gallery?sort=newest#photo-${id}`);
 });
 test('upload validates locally and previews without AI calls',async()=>{
  let calls=0;globalThis.fetch=async()=>{calls++;throw new Error('Unexpected request');};

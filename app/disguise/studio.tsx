@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { peekDisguiseDraft, clearDisguiseDraft } from "@/lib/disguise-draft";
 import { isUuid } from "@/lib/gallery-types";
@@ -17,7 +16,7 @@ function LabLoader() {
   return <div className={styles.loader} aria-hidden="true"><svg viewBox="0 0 120 120" fill="none"><circle className={styles.loaderTrack} cx="60" cy="60" r="52"/><circle className={styles.loaderArc} cx="60" cy="60" r="52"/><circle cx="60" cy="60" r="25" stroke="currentColor" strokeWidth="2"/><path d="m47 57 13 12 16-18M48 45h1m24 0h1" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/></svg></div>;
 }
 
-export function DisguiseStudio({ configured, userId }: { configured: boolean; userId: string }) {
+export function DisguiseStudio({ configured, userId, galleryUrl }: { configured: boolean; userId: string; galleryUrl?: string }) {
   const [source, setSource] = useState<{ image: string; name: string } | null>(() => peekDisguiseDraft());
   const router = useRouter();
   const pathname = usePathname();
@@ -182,7 +181,7 @@ export function DisguiseStudio({ configured, userId }: { configured: boolean; us
         <div className={styles.checkHalo} aria-hidden="true"><svg viewBox="0 0 140 140" fill="none"><circle className={styles.checkRing} cx="70" cy="70" r="60" /><circle className={styles.checkTicks} cx="70" cy="70" r="53"/><path className={styles.checkStroke} pathLength="1" d="m39 71 21 22 43-47" /></svg></div>
         <span>CHECKED</span>
       </div>
-      <div className={styles.publishedActions}><button className={styles.createAnother} onClick={createAnother}>Create Another Meme</button><Link className={styles.primary} href={`/gallery?sort=newest#photo-${photoId}`}>View in gallery</Link></div>
+      <div className={styles.publishedActions}><button className={styles.createAnother} onClick={createAnother}>Create Another Meme</button>{galleryUrl && <a className={styles.primary} href={`${galleryUrl}?sort=newest#photo-${photoId}`}>View in gallery</a>}</div>
     </FactoryModal>}
     {previewScreen && !generating ? <>
       <header className={styles.previewHeader}>
@@ -205,7 +204,7 @@ export function DisguiseStudio({ configured, userId }: { configured: boolean; us
           {result ? <div className={styles.options} role="group" aria-label="Choose a caption">{result.variants.map((option, index) => <button key={index} className={styles.option} aria-pressed={selected === index} disabled={locked || confirmed || !!photoId} onClick={() => setSelected(index)}><span className={styles.number}>{String(index + 1).padStart(2, "0")}</span><span>{option.caption}</span><span className={styles.selected} aria-hidden="true">{selected === index ? "✓" : ""}</span></button>)}</div> : <div className={styles.placeholders} aria-label="Captions are being created">{Array.from({ length: 5 }, (_, index) => <div key={index}><span>{String(index + 1).padStart(2, "0")}</span><i /></div>)}</div>}
           <div className={styles.publish}>
             {publishError && <p role="alert" className={styles.error}>{publishError}</p>}
-            {photoId ? !celebrating && <div className={styles.publishedActions}><button className={styles.createAnother} onClick={createAnother}>Create Another Meme</button><Link className={styles.primary} href={`/gallery?sort=newest#photo-${photoId}`}>View in gallery <span aria-hidden="true">↗</span></Link></div> : <button className={styles.primary} disabled={!result || locked} onClick={() => void publish()}>{publishing ? "Publishing…" : confirmed ? "Retry publishing" : "Publish to gallery"}<span aria-hidden="true">→</span></button>}
+            {photoId ? !celebrating && <div className={styles.publishedActions}><button className={styles.createAnother} onClick={createAnother}>Create Another Meme</button>{galleryUrl && <a className={styles.primary} href={`${galleryUrl}?sort=newest#photo-${photoId}`}>View in gallery <span aria-hidden="true">↗</span></a>}</div> : <button className={styles.primary} disabled={!result || locked} onClick={() => void publish()}>{publishing ? "Publishing…" : confirmed ? "Retry publishing" : "Publish to gallery"}<span aria-hidden="true">→</span></button>}
           </div>
         </section>
       </div>

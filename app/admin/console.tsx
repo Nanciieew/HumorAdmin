@@ -2,24 +2,20 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition, type FormEvent } from "react";
+import { useState, useTransition } from "react";
 import type { AdminAccount, AdminMedia, AdminPage, AdminVote } from "@/lib/admin/types";
 import styles from "./admin.module.css";
 
-type Props = { section: "users" | "media" | "votes"; admin: { id: string; email: string }; params: string;
+type Props = { section: "users" | "media" | "votes"; params: string;
   data: AdminPage<AdminAccount> | AdminPage<AdminMedia> | AdminPage<AdminVote> };
 const date = (value: string | null) => value ? new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" }) : "—";
 const accountName = (user: AdminAccount) => [user.first_name, user.last_name].filter(Boolean).join(" ") || "Awaiting profile";
 
-export function AdminConsole({ section, admin, params, data }: Props) {
+export function AdminConsole({ section, params, data }: Props) {
   const query = new URLSearchParams(params), router = useRouter();
   const [busy, setBusy] = useState(false), [pending, startTransition] = useTransition();
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [deleting, setDeleting] = useState<AdminMedia | null>(null);
-  const [mode, setMode] = useState("upload"), [owner, setOwner] = useState(admin.id);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const [fileName, setFileName] = useState("");
-  const [ownerQuery, setOwnerQuery] = useState(""), [owners, setOwners] = useState<AdminAccount[]>([]);
   const locked = busy || pending;
   const page = Number(query.get("page") ?? "1"), limit = Number(query.get("limit") ?? "25");
   const kind = query.get("kind") ?? "gallery";
@@ -27,7 +23,7 @@ export function AdminConsole({ section, admin, params, data }: Props) {
     const next = new URLSearchParams(params); next.set("page", String(value));
     return `/admin/${section}?${next}`;
   }
-  async function run(url: string, options: RequestInit, success: string, refresh = true) {
+  async function run(url: string, options: RequestInit, success: string) {
     if (locked) return null;
     setBusy(true); setError(""); setNotice("");
     try {
@@ -38,21 +34,12 @@ export function AdminConsole({ section, admin, params, data }: Props) {
         throw new Error(result.error || "The request failed.");
       }
       setNotice(success);
-      if (refresh) startTransition(() => router.refresh());
+      startTransition(() => router.refresh());
       return result;
     } catch (cause) { setError(cause instanceof Error ? cause.message : "The request failed."); return null; }
     finally { setBusy(false); }
   }
   const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  async function create(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget, values = new FormData(form);
-    values.set("owner", owner);
-    const result = mode === "upload"
-      ? await run("/api/admin/media", { method: "POST", body: values }, "Image saved privately. Publish it when ready.")
-      : await run("/api/admin/media/generate", json("POST", { owner, title: values.get("title"), description: values.get("description"), prompt: values.get("prompt") }), "Generated image saved privately. Publish it when ready.");
-    if (result) { form.reset(); setFileName(""); }
-  }
 
   return <>
     <div className={styles.sectionHeading}><h2>{section === "users" ? "Users & profiles" : section === "media" ? "Saved media" : "Votes & ratings"}</h2><span>{BigInt(data.total).toLocaleString("en-US")} records</span></div>
@@ -76,35 +63,7 @@ export function AdminConsole({ section, admin, params, data }: Props) {
 
     {error && <p role="alert" className={styles.error}>{error}</p>}
     {notice && <p role="status" className={styles.notice}>{notice}</p>}
-    {busy && <p role="status" className={styles.note}>{mode === "generate" ? "Working… Image generation can take a few minutes." : "Working…"}</p>}
-
-    {section === "media" && <details className={styles.create}><summary>Create media</summary>
-      <form onSubmit={create} aria-label="Create media">
-        <fieldset disabled={locked}><legend>New private image</legend>
-          <div className={styles.formGrid}>
-            <label>Create with<select value={mode} onChange={event => { setMode(event.target.value); setFileName(""); }}><option value="upload">Upload finished image</option><option value="generate">Generate with AI</option></select></label>
-            <label>Owner<select value={owner} onChange={event => setOwner(event.target.value)}><option value={admin.id}>{admin.email} (you)</option>{owners.filter(user => user.id !== admin.id).map(user => <option key={user.id} value={user.id}>{user.email} · {accountName(user)}</option>)}</select></label>
-            <label>Find another owner<input value={ownerQuery} onChange={event => setOwnerQuery(event.target.value)} maxLength={200} placeholder="Search completed profiles by email or name" /></label>
-            <button type="button" onClick={async () => {
-              const result = await run(`/api/admin/users?completed=true&limit=100&search=${encodeURIComponent(ownerQuery)}`, {}, "Owner search complete.", false);
-              if (result) { setOwners(result.items); setOwner(admin.id); setNotice(`${result.total} matching owners. Select one above${BigInt(result.total) > BigInt(100) ? "; narrow your search to find more" : ""}.`); }
-            }}>Find owner</button>
-            <label>Title<input name="title" maxLength={100} /></label>
-            <label>Description<textarea name="description" maxLength={1000} rows={2} /></label>
-          </div>
-          {mode === "upload" ? <div>
-            <label htmlFor="admin-media-file">Image (JPG, PNG or WebP, up to 2 MB)</label>
-            <div className={styles.filePicker}>
-              <input ref={fileInput} id="admin-media-file" className={styles.fileInput} type="file" name="file" accept="image/jpeg,image/png,image/webp" required aria-describedby="admin-media-file-status" onChange={event => setFileName(event.target.files?.[0]?.name ?? "")} />
-              <button type="button" onClick={() => fileInput.current?.click()} aria-describedby="admin-media-file-status">Choose file</button>
-              <span id="admin-media-file-status" role="status">{fileName || "No file chosen"}</span>
-            </div>
-          </div> : <label>Generation prompt<textarea key="prompt" name="prompt" required maxLength={4000} rows={3} placeholder="Describe the image to generate…" /></label>}
-          <p className={styles.note}>{mode === "generate" ? "Uses the configured Seedream provider. The prompt is sent when you click Generate image." : "Upload an image you have already generated. It will be stored privately."}</p>
-          <button className={styles.primary} type="submit">{mode === "upload" ? "Upload image" : "Generate image"}</button>
-        </fieldset>
-      </form>
-    </details>}
+    {busy && <p role="status" className={styles.note}>Working…</p>}
 
     <div className={styles.tableWrap}><table className={styles.table}>
       <caption className={styles.srOnly}>{section === "users" ? "User accounts and profiles" : section === "media" ? "Saved media and vote totals" : "Individual votes"}</caption>
