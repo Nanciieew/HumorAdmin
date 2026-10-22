@@ -39,7 +39,6 @@ async function AppShell({ children }: { children: ReactNode }) {
           {viewer && <Sidebar isAdmin={isAdmin}><Suspense fallback={<AccountMenu signedIn name={name} initials={initials} photoUrl={null} isAdmin={isAdmin} />}><ViewerAccount name={name} initials={initials} path={profile?.avatar_path ?? null} isAdmin={isAdmin} /></Suspense></Sidebar>}
           <div className="site-content">
             <AppHeader>{!viewer ? <AccountMenu signedIn={false} name="" initials="" photoUrl={null} /> : undefined}</AppHeader>
-            {!viewer && <nav className="ego-guest-nav" aria-label="Public navigation"><Link href="/admin">Control room</Link><Link href="/disguise">Checked Factory</Link></nav>}
             {children}
             <footer className="app-footer"><Link href="/">checked <span>© 2026</span></Link><Link href={viewer ? "/profile" : "/login"}>{viewer ? "Profile" : "Sign in"}</Link></footer>
           </div>

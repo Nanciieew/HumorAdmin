@@ -111,12 +111,12 @@ test('every underlying data operation independently enforces permission', async 
   for (const action of [() => server.listAdminUsers(new URLSearchParams()), () => server.listAdminMedia(new URLSearchParams()), () => server.listAdminVotes(new URLSearchParams()), () => server.previewAdminMedia(id), () => server.updateAdminMedia(id, {}), () => server.deleteAdminMedia(id, {}), () => server.publishAdminMedia(id), () => server.generateAdminMedia({}), () => server.uploadAdminMedia(new FormData())]) await assert.rejects(action(), error => error instanceof AdminError && error.status === 403);
   assert.equal(calls.length, 0);
 });
-test('page guards redirect anonymous users, hide unauthorized pages, and fail closed on database errors', async () => {
+test('page guards redirect anonymous and unauthorized users and fail closed on database errors', async () => {
   const google = user;
   user = null;
   await assert.rejects(requireAdminPage('/admin/media?status=private'), /REDIRECT:\/login\?next=%2Fadmin%2Fmedia%3Fstatus%3Dprivate/);
   user = google; flag = false;
-  await assert.rejects(requireAdminPage('/admin/users'), /NOT_FOUND/);
+  await assert.rejects(requireAdminPage('/admin/users'), /REDIRECT:\/auth\/access-denied\?next=%2Fadmin%2Fusers/);
   flag = true; permissionError = {};
   await assert.rejects(requireAdminPage('/admin/users'), error => error.status === 503);
   permissionError = null;

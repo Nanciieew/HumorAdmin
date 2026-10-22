@@ -8,7 +8,7 @@ export class AdminError extends Error {
 
 // Deliberately not cached across operations: revocation takes effect on the next request.
 // Use the user's RLS-scoped client for the permission lookup, before using any elevated client.
-export async function verifyAdmin(auth: SupabaseClient) {
+export async function verifiedAdminUser(auth: SupabaseClient) {
   const { data: { user }, error } = await auth.auth.getUser();
   if (error || !user) throw new AdminError("Sign in with Google to continue.", 401);
   if (!user.email_confirmed_at || !user.identities?.some(identity => identity.provider === "google")) {
@@ -17,6 +17,11 @@ export async function verifyAdmin(auth: SupabaseClient) {
   const permission = await auth.from("profiles").select("is_superadmin").eq("id", user.id).maybeSingle();
   if (permission.error) throw new AdminError("Unable to verify admin access. Try again later.", 503);
   if (permission.data?.is_superadmin !== true) throw new AdminError("Administrator access required.", 403);
+  return user;
+}
+
+export async function verifyAdmin(auth: SupabaseClient) {
+  const user = await verifiedAdminUser(auth);
   return { id: user.id, email: user.email ?? "" };
 }
 

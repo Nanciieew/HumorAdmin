@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { PHOTO_BUCKET, prepareProfilePhoto } from "@/lib/profile-photo";
 import { isUSState } from "@/lib/us-states";
 import { returnPath } from "@/lib/auth/return-path";
+import { requireAdminPage } from "@/lib/admin/page";
 
 export type ProfileState = { error?: string; success?: boolean };
 
@@ -27,6 +28,7 @@ export async function finishOnboarding(_state: ProfileState, form: FormData): Pr
 }
 
 async function persistProfile(form: FormData, complete: boolean): Promise<ProfileState> {
+  await requireAdminPage("/profile");
   const auth = await createAuthClient();
   const { data: { user }, error: authError } = await auth.auth.getUser();
   if (authError || !user) redirect("/login");

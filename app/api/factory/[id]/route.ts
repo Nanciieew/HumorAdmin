@@ -4,12 +4,16 @@ import { getViewer } from "@/lib/auth/profile";
 import { galleryWriter } from "@/lib/gallery-http";
 import { readFactoryBatch, previewFactoryBatch, publishFactoryBatch, discardFactoryBatch, cleanupFactoryBatches } from "@/lib/factory/server";
 import { factoryError } from "../response";
+import { requireAdmin } from "@/lib/admin/auth";
 export const maxDuration = 60;
 type Context = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, { params }: Context) {
-  const viewer = await getViewer();
-  if (!viewer) return Response.json({ error: "Please sign in." }, { status: 401 });
-  try { return Response.json(await previewFactoryBatch(await readFactoryBatch(viewer.user.id, (await params).id)), { headers: { "Cache-Control": "private, no-store" } }); }
+  try {
+    await requireAdmin();
+    const viewer = await getViewer();
+    if (!viewer) return Response.json({ error: "Complete your admin profile to continue." }, { status: 401, headers: { "Cache-Control": "private, no-store" } });
+    return Response.json(await previewFactoryBatch(await readFactoryBatch(viewer.user.id, (await params).id)), { headers: { "Cache-Control": "private, no-store" } });
+  }
   catch (error) { return factoryError(error); }
 }
 export async function POST(request: Request, { params }: Context) {

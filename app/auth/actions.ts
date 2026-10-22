@@ -17,7 +17,7 @@ export async function loginWithGoogle(_state: FormState, form: FormData): Promis
   const auth = await createAuthClient();
   const { data, error } = await auth.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo: new URL("/auth/callback", origin).toString(), skipBrowserRedirect: true },
+    options: { redirectTo: new URL("/auth/callback", origin).toString(), skipBrowserRedirect: true, queryParams: { prompt: "select_account" } },
   });
   if (error || !data.url) return { error: "Google login is unavailable. Please try again." };
   redirect(data.url);

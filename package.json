@@ -15,7 +15,8 @@
     "test:disguise": "node --import tsx --import ./scripts/roast-css-loader.mjs --test scripts/disguise-ui.test.mjs && node --conditions=react-server --import tsx --test scripts/seedream-generation.test.mjs",
     "test:images-reference": "node --import tsx --test scripts/seedream-reference.test.mjs",
     "audit:migration": "node --env-file=.env.local scripts/migration-audit.mjs",
-    "test:migration-routing": "node --import tsx --test scripts/migration-routing.test.mjs"
+    "test:migration-routing": "node --import tsx --test scripts/migration-routing.test.mjs",
+    "test:admin-login": "node --conditions=react-server --import tsx --import ./scripts/admin-test-loader.mjs --import ./scripts/admin-login-test-loader.mjs --test scripts/admin-login.test.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.1.1",

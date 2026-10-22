@@ -13,10 +13,26 @@ npm ci
 npm run dev -- --port 3001
 ```
 
-The root route sends confirmed Google superadmins to `/admin` and other completed
-accounts to `/disguise`. Pending profiles complete the original onboarding flow.
-The Admin pages remain protected on every request; Factory remains available to
-all signed-in users who completed onboarding, as in the source application.
+HumorAdmin is restricted to designated administrators. The root route sends
+authorized Google superadmins to `/admin`. Factory, profiles and application APIs
+require the same permission; only authorized administrators can complete a pending
+profile here. Ordinary users continue using the original user-facing application.
+
+The Google callback checks a confirmed email, Google identity and the current
+`profiles.is_superadmin = true` permission through the user's RLS client before
+loading profile data or entering the app. Unapproved accounts are signed out of
+this site's session and shown an access-denied message with an account-switch
+button. Lookup failures deny access with a retry message. Permissions are checked
+again on private requests so revocation does not depend on a stale browser flag.
+
+To designate another existing confirmed Google account with a profile, use the
+trusted local operator tool (never a public signup or browser-supplied flag):
+
+```sh
+node --env-file=.env.local scripts/admin-setup.mjs inspect account@example.com
+node --env-file=.env.local scripts/admin-setup.mjs grant account@example.com
+node --env-file=.env.local scripts/admin-setup.mjs grant account@example.com --apply
+```
 
 ## Configuration and deployment
 
@@ -69,6 +85,7 @@ npm run test:images-reference
 npm run test:images-media
 npm run test:images-db
 npm run test:migration-routing
+npm run test:admin-login
 npm run lint
 npm run build
 ```
