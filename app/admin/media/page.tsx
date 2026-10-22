@@ -1,0 +1,10 @@
+import { requireAdminPage } from "@/lib/admin/page";
+import { listAdminMedia } from "@/lib/admin/server";
+import { AdminConsole } from "../console";
+import { adminSearchParams } from "../search-params";
+
+export default async function MediaPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const params = adminSearchParams(await searchParams);
+  const admin = await requireAdminPage(`/admin/media${params.size ? `?${params}` : ""}`);
+  return <AdminConsole section="media" admin={admin} params={params.toString()} data={await listAdminMedia(params)} />;
+}

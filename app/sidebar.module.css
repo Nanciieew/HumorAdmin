@@ -1,0 +1,55 @@
+.sidebar:global(.app-sidebar) :global(.sidebar-links) { gap:16px; }
+.sidebar:global(.app-sidebar) :global(.sidebar-links) a { border-radius:12px; }
+.sidebar:global(.app-sidebar) :global(.sidebar-links) :global(.ui-icon) { width:24px;height:24px;stroke-width:1.8; }
+.sidebar:global(.app-sidebar) :global(.sidebar-links) a:global(.active) { background:#e8f04426;border-color:transparent;color:var(--accent,#e8f044); }
+@media(max-height:650px) { .sidebar:global(.app-sidebar) :global(.sidebar-links) { gap:10px; } }
+
+/* The collapsed rail uses the same geometry on every route. */
+.sidebar[data-collapsed="true"] { padding: 12px 9px; }
+
+.sidebar[data-collapsed="true"] :global(.app-brand) { flex: none; }
+.sidebar[data-collapsed="true"] :global(.brand-mark) { width: 32px; height: 32px; }
+
+.sidebar[data-collapsed="true"] :global(.nav-label),
+.sidebar[data-collapsed="true"] :global(.sidebar-links) a > span,
+.sidebar[data-collapsed="true"] :global(.sidebar-doodle),
+.sidebar[data-collapsed="true"] :global(.account-text),
+.sidebar[data-collapsed="true"] :global(.account-dots) { display: none; }
+.sidebar[data-collapsed="true"] :global(.sidebar-links) { margin-top: 28px; }
+.sidebar[data-collapsed="true"] :global(.sidebar-links) a { gap: 0; padding: 10px 0; min-height: 44px; }
+.sidebar[data-collapsed="true"] :global(.account-trigger) { padding: 3px calc((var(--rail-slot) - 34px) / 2); }
+.sidebar[data-collapsed="true"] :global(.account-face) { width: 34px; height: 34px; font-size: 14px; }
+.sidebar[data-collapsed="true"] :global(.account-popup) { left: calc(100% + 18px); bottom: 0; width: 190px; max-width: calc(100vw - 100px); }
+.sidebar[data-collapsed="true"] :global(.sidebar-logo) { width: 32px; }
+.sidebar[data-collapsed="true"] :global(.sidebar-logo-face) { opacity: 1; }
+.sidebar[data-collapsed="true"] :global(.sidebar-logo-full) { opacity: 0; }
+
+@media(min-width:701px) {
+  .sidebar[data-collapsed="true"] {
+    --rail-slot:52px;
+    width:72px;
+    top:14px;
+    height:calc(100dvh - 28px);
+    max-height:none;
+    margin:14px 12px;
+    border-radius:18px;
+  }
+}
+@media(max-width:700px) {
+  .sidebar[data-collapsed="true"] { width:62px;padding:10px 8px; }
+}
+
+@media(min-width:701px) {
+  .sidebar:global(.app-sidebar) {
+    position:fixed;
+    left:12px;
+    top:14px;
+    margin:0;
+    width:232px;
+    height:calc(100dvh - 28px);
+  }
+  .sidebar:global(.app-sidebar)[data-collapsed="true"] { width:72px;margin:0; }
+}
+@media(min-width:701px) {
+  :global(.app-shell):has(> .sidebar) > :global(.site-content) { grid-column:2; }
+}
