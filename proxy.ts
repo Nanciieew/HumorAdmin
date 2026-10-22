@@ -1,7 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { productionPageRedirect } from "@/lib/auth/production-url";
 
 export async function proxy(request: NextRequest) {
+  const canonical = productionPageRedirect(request);
+  if (canonical) {
+    const response = NextResponse.redirect(canonical, 307);
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
+  }
   // Overwrite any client-supplied value. Layout and page guards must agree on
   // the login destination even when Next renders their segments concurrently.
   request.headers.set("x-checked-admin-return", request.nextUrl.pathname + request.nextUrl.search);

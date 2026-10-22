@@ -47,6 +47,13 @@ the original project's Production environment and redeploy it if missing; its
 endpoint rejects requests without that secret. Keep the old application and
 shared tables/buckets intact until production acceptance is complete.
 
+Vercel's unique Production deployment URLs redirect browser page requests to the
+stable production domain before login, using the automatic
+`VERCEL_PROJECT_PRODUCTION_URL` system variable. This keeps the OAuth callback and
+PKCE cookies on the allowlisted origin when opening Vercel's Visit link. API
+requests, callbacks already in progress, local development and Preview deployments
+retain their current origin. Preview OAuth requires its own explicit setup.
+
 The build uses webpack, supports Node/sharp/OpenType, and explicitly traces the
 original Anton font into the Factory function. Neither workflow uses Edge or
 static export. Fonts, original model configuration, prompts, pixel rendering,
