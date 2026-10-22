@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import type { AdminAccount, AdminMedia, AdminPage, AdminVote } from "@/lib/admin/types";
+import type { AdminAccount, AdminMedia, AdminPage } from "@/lib/admin/types";
 import styles from "./admin.module.css";
 
-type Props = { section: "users" | "media" | "votes"; params: string;
-  data: AdminPage<AdminAccount> | AdminPage<AdminMedia> | AdminPage<AdminVote> };
+type Props = { section: "users" | "media"; params: string;
+  data: AdminPage<AdminAccount> | AdminPage<AdminMedia> };
 const date = (value: string | null) => value ? new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" }) : "—";
 const accountName = (user: AdminAccount) => [user.first_name, user.last_name].filter(Boolean).join(" ") || "Awaiting profile";
 
@@ -18,7 +18,6 @@ export function AdminConsole({ section, params, data }: Props) {
   const [deleting, setDeleting] = useState<AdminMedia | null>(null);
   const locked = busy || pending;
   const page = Number(query.get("page") ?? "1"), limit = Number(query.get("limit") ?? "25");
-  const kind = query.get("kind") ?? "gallery";
   function pageLink(value: number) {
     const next = new URLSearchParams(params); next.set("page", String(value));
     return `/admin/${section}?${next}`;
@@ -42,21 +41,15 @@ export function AdminConsole({ section, params, data }: Props) {
   const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
   return <>
-    <div className={styles.sectionHeading}><h2>{section === "users" ? "Users & profiles" : section === "media" ? "Saved media" : "Votes & ratings"}</h2><span>{BigInt(data.total).toLocaleString("en-US")} records</span></div>
-    <p className={styles.note}>{section === "users" ? "Account and profile information is read-only. Times are shown in New York time." : section === "votes" ? "Read-only gallery upvotes/downvotes and battle votes. Gallery totals appear in Media; there is no separate star-rating system." : "Edit captions, publish private images, or permanently delete saved media. Times are shown in New York time."}</p>
+    <div className={styles.sectionHeading}><h2>{section === "users" ? "Users and Profiles" : "Media"}</h2><span>{BigInt(data.total).toLocaleString("en-US")} records</span></div>
+    <p className={styles.note}>{section === "users" ? "Account and profile information is read-only. Times are shown in New York time." : "View upvotes and downvotes, edit captions, publish private images, or permanently delete saved media. Times are shown in New York time."}</p>
 
     <form key={`${section}:${params}`} action={`/admin/${section}`} className={styles.filters} aria-label="Filter records">
-      {section !== "votes" && <label>Search<input name="search" defaultValue={query.get("search") ?? ""} maxLength={200} placeholder={section === "users" ? "Email, name or account ID" : "Title, description or media ID"} /></label>}
+      <label>Search<input name="search" defaultValue={query.get("search") ?? ""} maxLength={200} placeholder={section === "users" ? "Email, name or account ID" : "Title, description or media ID"} /></label>
       {section === "media" && <>
         <label>Owner ID<input name="owner" defaultValue={query.get("owner") ?? ""} placeholder="Any owner" /></label>
         <label>Source<select name="source" defaultValue={query.get("source") ?? ""}><option value="">All sources</option><option value="generated">Generated</option><option value="upload">Upload</option></select></label>
         <label>Status<select name="status" defaultValue={query.get("status") ?? ""}><option value="">All statuses</option><option value="private">Private</option><option value="published">Published</option></select></label>
-      </>}
-      {section === "votes" && <>
-        <label>Vote type<select name="kind" defaultValue={kind} onChange={event => { const form = event.currentTarget.form!; const value = form.elements.namedItem("value") as HTMLSelectElement | null; if (value) value.value = ""; form.requestSubmit(); }}><option value="gallery">Gallery</option><option value="battle">Battle</option></select></label>
-        <label>{kind === "battle" ? "Challenge ID" : "Media ID"}<input name="target" defaultValue={query.get("target") ?? ""} placeholder="All targets" /></label>
-        <label>Voter ID<input name="voter" defaultValue={query.get("voter") ?? ""} placeholder="All voters" /></label>
-        {kind === "gallery" && <label>Value<select name="value" defaultValue={query.get("value") ?? ""}><option value="">All votes</option><option value="1">Upvote</option><option value="-1">Downvote</option></select></label>}
       </>}
       <button type="submit">Apply filters</button><Link href={`/admin/${section}`}>Clear</Link>
     </form>
@@ -66,8 +59,8 @@ export function AdminConsole({ section, params, data }: Props) {
     {busy && <p role="status" className={styles.note}>Working…</p>}
 
     <div className={styles.tableWrap}><table className={styles.table}>
-      <caption className={styles.srOnly}>{section === "users" ? "User accounts and profiles" : section === "media" ? "Saved media and vote totals" : "Individual votes"}</caption>
-      <thead><tr>{(section === "users" ? ["Account", "Profile", "Status", "Created"] : section === "media" ? ["Preview", "Captions", "Owner & details", "Votes", "Actions"] : kind === "gallery" ? ["Media", "Voter", "Vote"] : ["Challenge", "Voter", "Voted for"]).map(heading => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
+      <caption className={styles.srOnly}>{section === "users" ? "User accounts and profiles" : "Saved media and vote totals"}</caption>
+      <thead><tr>{(section === "users" ? ["Account", "Profile", "Status", "Created"] : ["Preview", "Captions", "Owner & details", "Votes", "Actions"]).map(heading => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
       <tbody>
         {section === "users" && (data.items as AdminAccount[]).map(user => <tr key={user.id}>
           <td><strong>{user.email ?? "No email"}</strong><code>{user.id}</code></td>
@@ -87,12 +80,7 @@ export function AdminConsole({ section, params, data }: Props) {
           <td><span>↑ {media.upvotes}</span><small>↓ {media.downvotes}</small></td>
           <td><div className={styles.rowActions}>{!media.published_at && <button disabled={locked} onClick={() => void run(`/api/admin/media/${media.id}/publish`, { method: "POST" }, "Image published to the gallery.")}>Publish</button>}<button className={styles.danger} disabled={locked} onClick={() => setDeleting(media)}>Delete</button></div></td>
         </tr>)}
-        {section === "votes" && (data.items as AdminVote[]).map(vote => <tr key={`${vote.photo_id ?? vote.challenge_id}:${vote.voter_id}`}>
-          <td>{vote.title || (kind === "battle" ? "Battle" : "Untitled image")}<code>{vote.photo_id ?? vote.challenge_id}</code></td>
-          <td>{vote.voter_name || "Unnamed voter"}<code>{vote.voter_id}</code></td>
-          <td>{kind === "gallery" ? vote.value === 1 ? "↑ Upvote" : "↓ Downvote" : <>{vote.target_name || "Unnamed participant"}<code>{vote.target_id}</code></>}</td>
-        </tr>)}
-        {data.items.length === 0 && <tr><td colSpan={section === "media" ? 5 : section === "users" ? 4 : 3}>No matching records.</td></tr>}
+        {data.items.length === 0 && <tr><td colSpan={section === "media" ? 5 : 4}>No matching records.</td></tr>}
       </tbody>
     </table></div>
     <nav className={styles.pagination} aria-label="Record pages">{page > 1 ? <Link href={pageLink(page - 1)}>← Previous</Link> : <span /> }<span>Page {page}</span>{BigInt(page * limit) < BigInt(data.total) ? <Link href={pageLink(page + 1)}>Next →</Link> : <span />}</nav>

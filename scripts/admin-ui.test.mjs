@@ -18,18 +18,17 @@ function mount(section='media',items=[media],total=String(items.length),params='
   return render(React.createElement(AppRouterContext.Provider,{value:{refresh(){refreshed++;},push(path){pushed.push(path);},replace(){},prefetch(){},back(){},forward(){}}},React.createElement(AdminConsole,{section,data:{items,total},params})));
 }
 afterEach(async()=>{await act(async()=>{});cleanup();globalThis.fetch=originalFetch;refreshed=0;pushed=[];});
-test('users and ratings remain read-only, include pending accounts and page through records',()=>{
+test('users remain read-only, include pending accounts and page through records',()=>{
   const user={id:admin.id,email:admin.email,account_created_at:'2026-10-20T12:00:00Z',profile_created_at:null,first_name:null,last_name:null,state_code:null,onboarding_completed_at:null,is_superadmin:false};
   const ui=mount('users',[user],'30');
   assert.ok(ui.getByText('Awaiting profile'));assert.ok(ui.getByText('Onboarding pending'));
   assert.equal(ui.queryByRole('button',{name:'Delete'}),null);assert.equal(ui.queryByRole('button',{name:'Save captions'}),null);
   assert.equal(ui.getByRole('link',{name:'Next →'}).getAttribute('href'),'/admin/users?page=2');
-  cleanup();const votes=mount('votes',[{photo_id:media.id,title:'A meme',voter_id:admin.id,voter_name:'Reader',value:-1}]);
-  assert.ok(votes.getByText('↓ Downvote'));assert.equal(votes.queryByRole('button',{name:'Delete'}),null);
 });
 test('media previews use protected endpoints and caption saves submit only editable fields',async()=>{
   const calls=[];globalThis.fetch=async(url,options)=>{calls.push({url,options});return Response.json({id:media.id});};
   const ui=mount();assert.equal(ui.queryByText('Create media'),null);assert.equal(ui.getByRole('img').getAttribute('src'),`/api/admin/media/${media.id}/preview`);
+  assert.ok(ui.getByText('↑ 9'));assert.ok(ui.getByText('↓ 2'));
   fireEvent.change(ui.getByLabelText(`Title for ${media.id}`),{target:{value:'Edited meme'}});
   await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Save captions'}));});
   assert.equal(refreshed,1);

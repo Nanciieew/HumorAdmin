@@ -1,10 +1,7 @@
+import { redirect } from "next/navigation";
 import { requireAdminPage } from "@/lib/admin/page";
-import { listAdminVotes } from "@/lib/admin/server";
-import { AdminConsole } from "../console";
-import { adminSearchParams } from "../search-params";
 
-export default async function VotesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const params = adminSearchParams(await searchParams);
-  await requireAdminPage(`/admin/votes${params.size ? `?${params}` : ""}`);
-  return <AdminConsole section="votes" params={params.toString()} data={await listAdminVotes(params)} />;
+export default async function VotesPage() {
+  await requireAdminPage("/admin/media");
+  redirect("/admin/media");
 }
