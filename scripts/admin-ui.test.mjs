@@ -25,14 +25,14 @@ test('users remain read-only, include pending accounts and page through records'
   assert.equal(ui.queryByRole('button',{name:'Delete'}),null);assert.equal(ui.queryByRole('button',{name:'Save captions'}),null);
   assert.equal(ui.getByRole('link',{name:'Next →'}).getAttribute('href'),'/admin/users?page=2');
 });
-test('media previews use protected endpoints and caption saves submit only editable fields',async()=>{
-  const calls=[];globalThis.fetch=async(url,options)=>{calls.push({url,options});return Response.json({id:media.id});};
+test('media shows a single caption, larger protected preview, and a Factory edit link without record IDs',()=>{
   const ui=mount();assert.equal(ui.queryByText('Create media'),null);assert.equal(ui.getByRole('img').getAttribute('src'),`/api/admin/media/${media.id}/preview`);
   assert.ok(ui.getByText('↑ 9'));assert.ok(ui.getByText('↓ 2'));
-  fireEvent.change(ui.getByLabelText(`Title for ${media.id}`),{target:{value:'Edited meme'}});
-  await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Save captions'}));});
-  assert.equal(refreshed,1);
-  assert.equal(calls[0].options.method,'PATCH');assert.deepEqual(JSON.parse(calls[0].options.body),{title:'Edited meme',description:'A caption'});
+  assert.ok(ui.getByText(media.description));assert.equal(ui.queryByText(media.title),null);
+  assert.equal(ui.queryByRole('textbox',{name:/Description/}),null);
+  assert.equal(ui.queryByText(media.id),null);assert.equal(ui.queryByText(media.contributor_id),null);
+  assert.equal(ui.getByRole('img').getAttribute('width'),'300');
+  assert.equal(ui.getByRole('link',{name:'Change caption'}).getAttribute('href'),`/disguise?media=${media.id}`);
 });
 test('deletion sends no request until confirmation, and cancel keeps the record',async()=>{
   const calls=[];globalThis.fetch=async(url,options)=>{calls.push({url,options});return Response.json({deleted:true});};
@@ -52,6 +52,6 @@ test('sales conflicts keep the deletion dialog open and show the server error',a
 test('publishing uses its explicit action; expired sessions return to Google login',async()=>{
   let count=0;globalThis.fetch=async()=>{count++;return count===1?Response.json({id:media.id}):Response.json({error:'Sign in with Google to continue.'},{status:401});};
   const ui=mount();await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Publish'}));});assert.equal(refreshed,1);
-  await waitFor(()=>assert.equal(ui.getByRole('button',{name:'Save captions'}).disabled,false));
-  await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Save captions'}));});assert.equal(pushed[0],'/login?next=%2Fadmin%2Fmedia');
+  await waitFor(()=>assert.equal(ui.getByRole('button',{name:'Publish'}).disabled,false));
+  await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Publish'}));});assert.equal(pushed[0],'/login?next=%2Fadmin%2Fmedia');
 });

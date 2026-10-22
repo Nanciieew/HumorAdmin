@@ -5,6 +5,7 @@ import { galleryWriter } from "@/lib/gallery-http";
 import { readFactoryBatch, previewFactoryBatch, publishFactoryBatch, discardFactoryBatch, cleanupFactoryBatches } from "@/lib/factory/server";
 import { factoryError } from "../response";
 import { requireAdmin } from "@/lib/admin/auth";
+import { refreshAdminMedia } from "@/lib/admin/http";
 export const maxDuration = 60;
 type Context = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, { params }: Context) {
@@ -23,6 +24,7 @@ export async function POST(request: Request, { params }: Context) {
   if (body?.approved !== true) return Response.json({ error: "Confirm public sharing first." }, { status: 400 });
   try {
     const result = await publishFactoryBatch(viewer.user.id, (await params).id, body.selected);
+    refreshAdminMedia(result.photoId);
     revalidatePath("/gallery"); revalidatePath("/my-works");
     after(() => cleanupFactoryBatches().catch(() => { console.error("Factory cleanup will retry on the next maintenance run."); }));
     return Response.json(result, { headers: { "Cache-Control": "private, no-store" } });

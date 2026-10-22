@@ -3,7 +3,7 @@ import {afterEach,test} from 'node:test';
 import {JSDOM} from 'jsdom';
 import React from 'react';
 import {AppRouterContext} from 'next/dist/shared/lib/app-router-context.shared-runtime.js';
-import {PathnameContext} from 'next/dist/shared/lib/hooks-client-context.shared-runtime.js';
+import {PathnameContext,SearchParamsContext} from 'next/dist/shared/lib/hooks-client-context.shared-runtime.js';
 const dom=new JSDOM('<html><body></body></html>',{url:'http://localhost:3000/disguise'});
 for(const name of ['window','document','navigator','HTMLElement','HTMLInputElement','MutationObserver','Node','Event','MouseEvent','getComputedStyle','FileReader','sessionStorage'])Object.defineProperty(globalThis,name,{configurable:true,value:dom.window[name]});
 dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
@@ -21,7 +21,7 @@ function setup({configured=true,path='/disguise'}={}){
  function Harness(){
   const [pathname,setPathname]=React.useState(path);
   const router=React.useMemo(()=>({push:setPathname,replace:setPathname}),[]);
-  return React.createElement(AppRouterContext.Provider,{value:router},React.createElement(PathnameContext.Provider,{value:pathname},React.createElement(DisguiseStudio,{configured,userId:'tester',galleryUrl:'https://original.example/gallery'})));
+  return React.createElement(AppRouterContext.Provider,{value:router},React.createElement(SearchParamsContext.Provider,{value:new URLSearchParams(pathname.split('?')[1])},React.createElement(PathnameContext.Provider,{value:pathname.split('?')[0]},React.createElement(DisguiseStudio,{configured,userId:'tester',galleryUrl:'https://original.example/gallery'}))));
  }
  return render(React.createElement(Harness));
 }
@@ -124,4 +124,42 @@ test('Precision Lab success window closes back to the published preview without 
  fireEvent.click(ui.getByRole('button',{name:'Close success window'}));
  assert.equal(ui.queryByRole('dialog',{name:'Meme published'}),null);
  assert.ok(ui.getByRole('link',{name:'View in gallery'}));assert.equal(calls,2);
+});
+
+test('manual captions work without AI configuration and preview a single rendered option',async()=>{
+ draft();const calls=[];
+ globalThis.fetch=async(url,options)=>{calls.push({url,body:JSON.parse(options.body)});return Response.json({...preview,variants:[{caption:'My own joke',url:preview.variants[0].url}]});};
+ const ui=setup({configured:false});fireEvent.click(ui.getByRole('button',{name:'Write my own caption'}));
+ fireEvent.change(ui.getByLabelText('Your caption'),{target:{value:'My own joke'}});
+ assert.equal(generateButton(ui).disabled,false);fireEvent.click(generateButton(ui));
+ await waitFor(()=>assert.ok(ui.getByRole('heading',{name:'Your caption'})));
+ assert.equal(calls.length,1);assert.equal(calls[0].body.mode,'manual');assert.equal(calls[0].body.caption,'My own joke');
+ assert.ok(ui.getByAltText('Meme preview: My own joke'));assert.ok(ui.getByText('1 / 1'));
+});
+
+test('Media edits automatically load the original and save the selected caption back to the existing meme',async()=>{
+ const mediaId='40000000-0000-4000-8000-000000000001',calls=[];
+ globalThis.fetch=async(url,options)=>{
+  calls.push({url,options});
+  if(url.endsWith('/original'))return Response.json({image:'data:image/png;base64,AA==',caption:'Existing joke'});
+  return Response.json(url==='/api/factory'?{...preview,mediaId}:{photoId:mediaId});
+ };
+ const ui=setup({path:`/disguise?media=${mediaId}`});
+ await waitFor(()=>assert.ok(ui.getByAltText('Your uploaded meme picture')));
+ assert.equal(calls.length,1);assert.equal(calls[0].url,`/api/admin/media/${mediaId}/original`);
+ fireEvent.click(ui.getByRole('button',{name:'Write my own caption'}));assert.equal(ui.getByLabelText('Your caption').value,'Existing joke');
+ fireEvent.click(ui.getByRole('button',{name:'Generate with AI'}));
+ await generate(ui);
+ assert.equal(JSON.parse(calls[1].options.body).mediaId,mediaId);
+ fireEvent.click(ui.getByRole('button',{name:'Save caption'}));
+ await waitFor(()=>assert.ok(ui.getByRole('link',{name:'Back to Media'})));
+ assert.equal(ui.getByRole('link',{name:'Back to Media'}).getAttribute('href'),'/admin/media');
+ assert.ok(ui.getByRole('status',{name:'Caption saved. CHECKED'}));
+});
+
+test('legacy memes ask for the caption-free original rather than loading the flattened meme',async()=>{
+ globalThis.fetch=async()=>Response.json({image:null,caption:'Old joke'});
+ const ui=setup({path:'/disguise?media=40000000-0000-4000-8000-000000000001'});
+ await waitFor(()=>assert.ok(ui.getByText(/original photo wasn’t saved/)));
+ assert.equal(ui.queryByAltText('Your uploaded meme picture'),null);assert.equal(generateButton(ui).disabled,true);
 });

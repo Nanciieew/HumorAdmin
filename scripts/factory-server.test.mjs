@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, beforeEach, test } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
+import './admin-test-loader.mjs';
 process.env.NEXT_PUBLIC_SUPABASE_URL='https://fixture.supabase.co';process.env.SUPABASE_SECRET_KEY='fixture';process.env.GEMINI_API_KEY='fixture';process.env.GEMINI_MODEL='fixture-model';process.env.ARK_API_KEY='fixture';
 const {supabase}=await import('../lib/supabase.ts');
 const {generateFactoryBatch,publishFactoryBatch,readFactoryBatch,previewFactoryBatch,discardFactoryBatch,cleanupFactoryBatches,factoryPath}=await import('../lib/factory/server.ts');
@@ -13,6 +14,10 @@ let failVariant=-1,failRemove=false;
 const bytes=await sharp({create:{width:400,height:300,channels:3,background:'#aaa'}}).jpeg().toBuffer();
 const image=`data:image/jpeg;base64,${bytes.toString('base64')}`;
 const owner=randomUUID(),captions=['My last brain cell has left the chat','When the deadline starts looking back','Me pretending the Wi-Fi caused this','Monday called and I declined','That meeting could have been a nap'];
+globalThis.__adminAuthClient={
+ auth:{async getUser(){return{data:{user:{id:owner,email:'admin@example.com',email_confirmed_at:'2026-01-01',identities:[{provider:'google'}]}},error:null};}},
+ from(){return{select(){return this;},eq(){return this;},async maybeSingle(){return{data:{is_superadmin:true},error:null};}};},
+};
 class Query {
  filters=[];op='select';values=null;count=Infinity;
  constructor(table){this.rows=tables[table];this.table=table;assert.ok(this.rows,table);}
@@ -53,7 +58,7 @@ test('invalid input never calls either provider; malformed or duplicate caption 
  for(const value of [{captions:['one']},{captions:Array(5).fill('same')},{captions:[...captions.slice(0,4),'x'.repeat(181)]}])assert.throws(()=>parseCaptions(value));
 });
 test('five captions produce five cached overlays on the unchanged original, with no image-provider calls',async()=>{
- const result=await generate();assert.equal(result.variants.length,5);assert.equal(tables.images.size,0);assert.equal(objects.size,5);
+ const result=await generate();assert.equal(result.variants.length,5);assert.equal(tables.images.size,0);assert.equal(objects.size,6);
  assert.deepEqual(result.variants.map(variant=>variant.caption),captions);
  assert.equal(requests.filter(call=>call.provider==='captions').length,1);
  assert.equal(requests.length,1);
@@ -74,7 +79,7 @@ test('publishing keeps the selected image, deletes the other four, and retries w
  assert.ok(objects.has(`generated-images/${factoryPath(owner,batch.id,selected)}`));
  for(const index of [0,1,3,4])assert.equal(objects.has(`generated-images/${factoryPath(owner,batch.id,index)}`),false);
  assert.deepEqual(objects.get(`gallery-photos/${tables.images.get(batch.id).public_storage_path}`),objects.get(`generated-images/${factoryPath(owner,batch.id,selected)}`),'publication copies the exact lossless rendered bytes');
- assert.equal(objects.size,2);await publishFactoryBatch(owner,batch.id,selected);assert.equal(objects.size,2);
+ assert.equal(objects.size,3);await publishFactoryBatch(owner,batch.id,selected);assert.equal(objects.size,3);
  await assert.rejects(publishFactoryBatch(owner,batch.id,0),/already been published/);
  assert.equal(requests.length,1);
 });
@@ -82,7 +87,7 @@ test('cross-account reads and publications cannot reveal or delete another batch
  const batch=await generate(),other=randomUUID();
  await assert.rejects(readFactoryBatch(other,batch.id),/not found/);
  await assert.rejects(publishFactoryBatch(other,batch.id,0),/not found/);
- await assert.rejects(discardFactoryBatch(other,batch.id),/not found/);assert.equal(objects.size,5);
+ await assert.rejects(discardFactoryBatch(other,batch.id),/not found/);assert.equal(objects.size,6);
 });
 test('one failed image waits for siblings then deletes all partial outputs',async()=>{
  failVariant=2;await assert.rejects(generate(),/cache a meme/);assert.equal(objects.size,0);assert.equal(tables.images.size,0);
@@ -90,18 +95,66 @@ test('one failed image waits for siblings then deletes all partial outputs',asyn
 });
 test('concurrent differing selections publish only one keeper',async()=>{
  const batch=await generate();const results=await Promise.allSettled([publishFactoryBatch(owner,batch.id,0),publishFactoryBatch(owner,batch.id,1)]);
- assert.equal(results.filter(result=>result.status==='fulfilled').length,1);assert.equal(tables.images.size,1);assert.equal(objects.size,2);
+ assert.equal(results.filter(result=>result.status==='fulfilled').length,1);assert.equal(tables.images.size,1);assert.equal(objects.size,3);
 });
 test('cleanup failure after publishing is safely retryable without deleting the selected original',async()=>{
  const batch=await generate();failRemove=true;await assert.rejects(publishFactoryBatch(owner,batch.id,3),/cleanup is pending/);
  assert.equal(tables.factory_batches.get(batch.id).state,'published');assert.ok(tables.images.get(batch.id).published_at);
  assert.equal((await previewFactoryBatch(await readFactoryBatch(owner,batch.id))).photoId,undefined,'restoring a batch never reports unfinished cleanup as complete');
- failRemove=false;await publishFactoryBatch(owner,batch.id,3);assert.equal(objects.size,2);assert.ok(objects.has(`generated-images/${factoryPath(owner,batch.id,3)}`));
+ failRemove=false;await publishFactoryBatch(owner,batch.id,3);assert.equal(objects.size,3);assert.ok(objects.has(`generated-images/${factoryPath(owner,batch.id,3)}`));
 });
 test('expiration removes abandoned batches and preserves published memes',async()=>{
  const abandoned=await generate();await discardFactoryBatch(owner,abandoned.id);assert.equal(objects.size,0);
  const published=await generate();await publishFactoryBatch(owner,published.id,4);
  for(const batch of tables.factory_batches.values())batch.expires_at='2000-01-01T00:00:00Z';
- await cleanupFactoryBatches();assert.equal(tables.factory_batches.size,0);assert.equal(tables.images.size,1);assert.equal(objects.size,2);
+ await cleanupFactoryBatches();assert.equal(tables.factory_batches.size,0);assert.equal(tables.images.size,1);assert.equal(objects.size,3);
  assert.ok(objects.has(`generated-images/${factoryPath(owner,published.id,4)}`));
+});
+
+test('manual captions render and publish one variant without a configured AI provider, retaining the exact original',async()=>{
+ const key=process.env.GEMINI_API_KEY,model=process.env.GEMINI_MODEL;
+ delete process.env.GEMINI_API_KEY;delete process.env.GEMINI_MODEL;
+ try {
+  const id=randomUUID(),caption='Me leaving the group chat';
+  const batch=await generateFactoryBatch(owner,{id,image,direction:'',mode:'manual',caption,approved:true});
+  assert.equal(batch.variants.length,1);assert.equal(batch.variants[0].caption,caption);assert.equal(requests.length,0);
+  await assert.rejects(publishFactoryBatch(owner,id,1),/not ready/);
+  assert.equal((await publishFactoryBatch(owner,id,0)).photoId,id);
+  assert.equal(tables.images.get(id).description,caption);
+  assert.deepEqual(objects.get(`generated-images/${owner}/originals/${id}`),bytes);
+  for(const row of tables.factory_batches.values())row.expires_at='2000-01-01T00:00:00Z';
+  await cleanupFactoryBatches();
+  assert.deepEqual(objects.get(`generated-images/${owner}/originals/${id}`),bytes);
+ } finally {process.env.GEMINI_API_KEY=key;process.env.GEMINI_MODEL=model;}
+});
+
+test('invalid manual captions fail without provider calls or retained uploads',async()=>{
+ for(const caption of ['', 'x'.repeat(181), 'a'.repeat(90)]) {
+  await assert.rejects(generateFactoryBatch(owner,{id:randomUUID(),image,direction:'',mode:'manual',caption,approved:true}));
+ }
+ assert.equal(requests.length,0);assert.equal(objects.size,0);
+});
+
+test('Media caption batches update the original record, survive cleanup retries, and retain the original for its owner',async()=>{
+ const mediaId=randomUUID(),mediaOwner=randomUUID(),caption='Me leaving the group chat';
+ const row={id:mediaId,contributor_id:mediaOwner,source:'generated',private_storage_path:`${mediaOwner}/before.webp`,public_storage_path:`${mediaOwner}/before-public.webp`,published_at:'2026-01-01T00:00:00Z',title:'Old caption',description:'Old caption',upvotes:'9',downvotes:'2'};
+ tables.images.set(mediaId,row);
+ const id=randomUUID();
+ const batch=await generateFactoryBatch(owner,{id,image,direction:'',mode:'manual',caption,approved:true,mediaId});
+ assert.equal(batch.mediaId,mediaId);assert.equal(row.description,'Old caption');assert.equal(tables.images.size,1);
+ failRemove=true;await assert.rejects(publishFactoryBatch(owner,id,0),/cleanup is pending/);
+ assert.equal(row.description,caption);assert.equal(row.contributor_id,mediaOwner);assert.equal(row.upvotes,'9');assert.equal(row.downvotes,'2');assert.equal(row.published_at,'2026-01-01T00:00:00Z');
+ assert.equal((await previewFactoryBatch(await readFactoryBatch(owner,id))).photoId,undefined);
+ failRemove=false;
+ assert.equal((await publishFactoryBatch(owner,id,0)).photoId,mediaId);
+ assert.equal((await previewFactoryBatch(await readFactoryBatch(owner,id))).photoId,mediaId);
+ assert.equal(tables.images.size,1);
+ assert.deepEqual(objects.get(`generated-images/${mediaOwner}/originals/${id}`),bytes);
+ const kept=objects.get(`generated-images/${row.private_storage_path}`);
+ assert.deepEqual(kept,objects.get(`gallery-photos/${row.public_storage_path}`));
+ for(const batch of tables.factory_batches.values())batch.expires_at='2000-01-01T00:00:00Z';
+ await cleanupFactoryBatches();
+ assert.equal(tables.factory_batches.size,0);assert.equal(tables.images.size,1);
+ assert.deepEqual(objects.get(`generated-images/${row.private_storage_path}`),kept);
+ assert.deepEqual(objects.get(`generated-images/${mediaOwner}/originals/${id}`),bytes);
 });

@@ -6,6 +6,7 @@ import { fetchGeneratedImage, normalizeGalleryImage, publishGalleryImage } from 
 import { generateSeedreamOutput, ImageGenerationError } from "@/lib/seedream-generation";
 import { AdminError, requireAdmin } from "./auth";
 import type { AdminAccount, AdminMedia, AdminPage, AdminVote } from "./types";
+import { mediaOriginalPath } from "../factory/original";
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new AdminError("Invalid request.");
@@ -171,6 +172,7 @@ export async function deleteAdminMedia(id: string, body: unknown) {
   if (result.error?.code === "23503") throw new AdminError("This media is referenced by existing records, such as sales, and cannot be deleted.", 409);
   if (result.error) throw new AdminError("Unable to delete this media.", 503);
   if (result.data) {
+    await removeObject("generated-images", mediaOriginalPath(result.data.contributor_id, id, result.data.private_storage_path, result.data.public_storage_path));
     for (const [bucket, path] of [["generated-images", result.data.private_storage_path], ["gallery-photos", result.data.public_storage_path]]) {
       if (typeof path === "string" && path.startsWith(`${result.data.contributor_id}/`)) await removeObject(bucket, path);
     }

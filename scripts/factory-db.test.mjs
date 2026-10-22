@@ -19,3 +19,16 @@ test('factory migration is repeatable, private, and permits only one active gene
   }
  }finally{await db.close();}
 });
+
+test('original retention adds JPG and PNG without changing private-bucket limits or other MIME types',async()=>{
+ const db=new PGlite();
+ try {
+  await db.exec("create schema storage; create table storage.buckets(id text primary key, public boolean, file_size_limit bigint, allowed_mime_types text[]); insert into storage.buckets values ('generated-images',false,10485760,array['image/webp']),('other',true,99,array['image/gif']);");
+  const migration=await readFile(new URL('../supabase/migrations/20261022000000_retain_factory_originals.sql',import.meta.url),'utf8');
+  await db.exec(migration);await db.exec(migration);
+  const {rows}=await db.query("select * from storage.buckets where id='generated-images'");
+  assert.deepEqual(rows[0].allowed_mime_types,['image/jpeg','image/png','image/webp']);
+  assert.equal(rows[0].public,false);assert.equal(Number(rows[0].file_size_limit),10485760);
+  assert.deepEqual((await db.query("select allowed_mime_types from storage.buckets where id='other'")).rows[0].allowed_mime_types,['image/gif']);
+ } finally {await db.close();}
+});

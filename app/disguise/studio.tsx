@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { peekDisguiseDraft, clearDisguiseDraft } from "@/lib/disguise-draft";
 import { isUuid } from "@/lib/gallery-types";
 import type { FactoryPreview } from "@/lib/factory/types";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import styles from "./studio.module.css";
 
 function FactoryModal({ label, children, onClose }: { label: string; children: ReactNode; onClose?: () => void }) {
@@ -20,10 +20,17 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
   const [source, setSource] = useState<{ image: string; name: string } | null>(() => peekDisguiseDraft());
   const router = useRouter();
   const pathname = usePathname();
+  const mediaId = useSearchParams()?.get("media") ?? null;
+  const editing = isUuid(mediaId);
+  const factoryRoute = (path: string) => editing ? `${path}?media=${mediaId}` : path;
   const previewScreen = pathname === "/disguise/preview";
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [direction, setDirection] = useState("");
+  const [mode, setMode] = useState<"ai" | "manual">("ai");
+  const [caption, setCaption] = useState("");
+  const [missingOriginal, setMissingOriginal] = useState(false);
+  const loadedMedia = useRef<string | null>(null);
   const [reading, setReading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -40,13 +47,13 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
   const reader = useRef<FileReader | null>(null);
   const mounted = useRef(false), inFlight = useRef(false), publishingRef = useRef(false);
   const batchId = useRef<string | null>(null), version = useRef(0);
-  const storageKey = `checked:factory-batch:${userId}`;
+  const storageKey = `checked:factory-batch:${userId}${editing ? `:media:${mediaId}` : ""}`;
   function remember(id: string | null) {
     batchId.current = id;
     try { if (id) sessionStorage.setItem(storageKey, id); else sessionStorage.removeItem(storageKey); } catch { /* The active batch still works without storage. */ }
   }
   function acceptPreview(data: FactoryPreview) {
-    if (!isUuid(data.id) || !Array.isArray(data.variants) || data.variants.length !== 5 || data.variants.some(variant => typeof variant.caption !== "string" || typeof variant.url !== "string" || (variant.url && !variant.url.startsWith("https://")))) throw new Error("The previews couldn’t be loaded. Please try again.");
+    if (!isUuid(data.id) || !Array.isArray(data.variants) || ![1, 5].includes(data.variants.length) || data.variants.some(variant => typeof variant.caption !== "string" || typeof variant.url !== "string" || (variant.url && !variant.url.startsWith("https://")))) throw new Error("The previews couldn’t be loaded. Please try again.");
     setResult(data); setSelected(data.selected ?? 0); setConfirmed(data.selected !== null); setPhotoId(data.photoId ?? ""); setRecoverable(false);
   }
   const restore = useCallback(async (id: string, signal?: AbortSignal) => {
@@ -63,6 +70,32 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
   }, []);
   useEffect(() => { if (source) clearDisguiseDraft(source.image); }, [source]);
   useEffect(() => {
+    if (!isUuid(mediaId) || loadedMedia.current === mediaId) return;
+    const controller = new AbortController();
+    async function load() {
+      setReading(true); setError(""); setSource(null); setResult(null); setPhotoId(""); setConfirmed(false); setMissingOriginal(false);
+      if (!previewScreen) {
+        batchId.current = null;
+        try { sessionStorage.removeItem(storageKey); } catch { /* Storage is optional. */ }
+      }
+      try {
+        const response = await fetch(`/api/admin/media/${mediaId}/original`, { cache: "no-store", signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Couldn’t load the original photo.");
+        if (controller.signal.aborted) return;
+        if (data.image !== null && (typeof data.image !== "string" || !/^data:image\/(jpeg|png);base64,/.test(data.image))) throw new Error("The original photo couldn’t be loaded.");
+        loadedMedia.current = mediaId;
+        setCaption(data.caption || "");
+        setSource(data.image ? { image: data.image, name: "Original meme photo" } : null);
+        setMissingOriginal(!data.image);
+      } catch (cause) {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Couldn’t load the original photo.");
+      } finally { if (!controller.signal.aborted) setReading(false); }
+    }
+    void load();
+    return () => controller.abort();
+  }, [mediaId, storageKey, previewScreen]);
+  useEffect(() => {
     mounted.current = true;
     const controller = new AbortController();
     return () => { mounted.current = false; controller.abort(); request.current?.abort(); reader.current?.abort(); };
@@ -75,10 +108,10 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
     const timer = window.setTimeout(() => {
       if (inFlight.current) return;
       if (isUuid(savedId)) { batchId.current = savedId; void restore(savedId, controller.signal); }
-      else router.replace("/disguise");
+      else router.replace(mediaId ? `/disguise?media=${mediaId}` : "/disguise");
     }, 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [storageKey, restore, previewScreen, result, router]);
+  }, [storageKey, restore, previewScreen, result, router, mediaId]);
   useEffect(() => {
     if (!result) return;
     const previews = result.variants.filter(variant => variant.url).map(variant => {
@@ -103,15 +136,15 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
       if (!mounted.current || token !== version.current) return;
       setReading(false);
       if (typeof next.result !== "string") { setError("Couldn’t read that picture. Try another file."); return; }
-      setSource({ image: next.result, name: file.name });
+      setSource({ image: next.result, name: file.name }); setMissingOriginal(false);
     };
     next.onerror = () => { if (mounted.current && token === version.current) { setReading(false); setError("Couldn’t read that picture. Try another file."); } };
     next.readAsDataURL(file);
   }
   async function generate() {
-    if (!source || !configured || inFlight.current || publishingRef.current) return;
+    if (!source || (mode === "ai" && !configured) || (mode === "manual" && !caption.trim()) || inFlight.current || publishingRef.current) return;
     inFlight.current = true; setBusy(true); setGenerating(true); setError(""); setPublishError("");
-    router.push("/disguise/preview", { scroll: false });
+    router.push(factoryRoute("/disguise/preview"), { scroll: false });
     const token = ++version.current;
     const controller = new AbortController(); request.current = controller;
     try {
@@ -119,7 +152,7 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
       if (!mounted.current || token !== version.current) return;
       setResult(null); setPhotoId(""); setConfirmed(false); setRecoverable(false);
       const id = crypto.randomUUID(); remember(id);
-      const response = await fetch("/api/factory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, image: source.image, direction: direction.trim(), approved: true }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(190_000)]) });
+      const response = await fetch("/api/factory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, image: source.image, direction: direction.trim(), approved: true, mode, ...(mode === "manual" ? { caption: caption.trim() } : {}), ...(editing ? { mediaId } : {}) }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(190_000)]) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Couldn’t generate your memes. Please try again.");
       if (mounted.current && token === version.current) acceptPreview(data);
@@ -131,7 +164,7 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
     version.current++; request.current?.abort(); inFlight.current = false;
     const id = batchId.current;
     setBusy(false); setGenerating(false); setError("");
-    router.push("/disguise", { scroll: false });
+    router.push(factoryRoute("/disguise"), { scroll: false });
     if (id) try { await discard(id); remember(null); setRecoverable(false); } catch { setError("Generation stopped here. Cached previews will expire automatically."); }
   }
   async function publish() {
@@ -156,7 +189,7 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
     setError(""); setPublishError("");
     // Defer discarding the cached batch until Create meme is clicked again.
     // Going back or forward can still restore the current selection.
-    router.push("/disguise", { scroll: false });
+    router.push(factoryRoute("/disguise"), { scroll: false });
   }
   function createAnother() {
     if (inFlight.current || publishingRef.current) return;
@@ -164,10 +197,14 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
     remember(null);
     setCelebrating(false); setSource(null); setResult(null); setPhotoId("");
     setConfirmed(false); setSelected(0); setDirection(""); setError(""); setPublishError(""); setRecoverable(false);
+    setCaption(""); setMode("ai"); setMissingOriginal(false); loadedMedia.current = null;
     router.push("/disguise", { scroll: false });
   }
   const locked = busy || publishing;
   const variant = result?.variants[selected];
+  const changingCaption = editing || Boolean(result?.mediaId);
+  const destination = changingCaption ? "/admin/media" : galleryUrl && `${galleryUrl}?sort=newest#photo-${photoId}`;
+  const destinationLabel = changingCaption ? "Back to Media" : "View in gallery";
   const errorPanel = error && <div role="alert" className={styles.error}><span>{error}</span>{recoverable && !busy && <button onClick={() => { if (batchId.current) void restore(batchId.current); }}>Try loading again</button>}</div>;
   return <main id="main" data-factory-screen={previewScreen ? "preview" : "upload"} className={styles.factory}>
     <div className={styles.topbar}><span className={styles.topbarMark} aria-hidden="true">⌁</span><span>Checked <b>Factory</b></span></div>
@@ -175,13 +212,13 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
       <LabLoader /><p className={styles.modalTitle} role="status">{publishing ? "Publishing your meme…" : generating ? "Creating your memes…" : "Loading your memes…"}</p>
       {generating && <button className={styles.cancelGeneration} onClick={() => void cancel()}>Cancel</button>}
     </FactoryModal>}
-    {celebrating && <FactoryModal label="Meme published" onClose={() => setCelebrating(false)}>
+    {celebrating && <FactoryModal label={changingCaption ? "Caption saved" : "Meme published"} onClose={() => setCelebrating(false)}>
       <button className={styles.closeModal} aria-label="Close success window" onClick={() => setCelebrating(false)}>×</button>
-      <div className={styles.checkedStamp} role="status" aria-label="Meme published. CHECKED">
+      <div className={styles.checkedStamp} role="status" aria-label={changingCaption ? "Caption saved. CHECKED" : "Meme published. CHECKED"}>
         <div className={styles.checkHalo} aria-hidden="true"><svg viewBox="0 0 140 140" fill="none"><circle className={styles.checkRing} cx="70" cy="70" r="60" /><circle className={styles.checkTicks} cx="70" cy="70" r="53"/><path className={styles.checkStroke} pathLength="1" d="m39 71 21 22 43-47" /></svg></div>
         <span>CHECKED</span>
       </div>
-      <div className={styles.publishedActions}><button className={styles.createAnother} onClick={createAnother}>Create Another Meme</button>{galleryUrl && <a className={styles.primary} href={`${galleryUrl}?sort=newest#photo-${photoId}`}>View in gallery</a>}</div>
+      <div className={styles.publishedActions}><button className={styles.createAnother} onClick={createAnother}>Create Another Meme</button>{destination && <a className={styles.primary} href={destination}>{destinationLabel}</a>}</div>
     </FactoryModal>}
     {previewScreen && !generating ? <>
       <header className={styles.previewHeader}>
@@ -197,19 +234,20 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
             <img key={variant?.url || source?.image} src={variant?.url || source?.image} alt={variant ? `Meme preview: ${variant.caption}` : "Your uploaded meme picture"} />
 
           </div> : <div className={styles.empty} role="status"><span aria-hidden="true">✳</span><p>{busy ? "Loading your memes…" : "Your preview will appear here."}</p></div>}
-          {variant && <span className={styles.previewCount}>{selected + 1} / 5</span>}
+          {variant && <span className={styles.previewCount}>{selected + 1} / {result?.variants.length}</span>}
         </section>
         <section className={styles.captions} aria-labelledby="captions-title">
-          <div className={styles.panelHeader}><h2 id="captions-title">Pick your caption</h2><span>{photoId ? "PUBLISHED" : "5 CAPTIONS"}</span></div>
-          {result ? <div className={styles.options} role="group" aria-label="Choose a caption">{result.variants.map((option, index) => <button key={index} className={styles.option} aria-pressed={selected === index} disabled={locked || confirmed || !!photoId} onClick={() => setSelected(index)}><span className={styles.number}>{String(index + 1).padStart(2, "0")}</span><span>{option.caption}</span><span className={styles.selected} aria-hidden="true">{selected === index ? "✓" : ""}</span></button>)}</div> : <div className={styles.placeholders} aria-label="Captions are being created">{Array.from({ length: 5 }, (_, index) => <div key={index}><span>{String(index + 1).padStart(2, "0")}</span><i /></div>)}</div>}
+          <div className={styles.panelHeader}><h2 id="captions-title">{result?.variants.length === 1 ? "Your caption" : "Pick your caption"}</h2><span>{photoId ? changingCaption ? "SAVED" : "PUBLISHED" : `${result?.variants.length ?? 5} CAPTION${result?.variants.length === 1 ? "" : "S"}`}</span></div>
+          {result ? <div className={styles.options} style={{ gridTemplateRows: `repeat(${result.variants.length}, minmax(0, 1fr))` }} role="group" aria-label="Choose a caption">{result.variants.map((option, index) => <button key={index} className={styles.option} aria-pressed={selected === index} disabled={locked || confirmed || !!photoId} onClick={() => setSelected(index)}><span className={styles.number}>{String(index + 1).padStart(2, "0")}</span><span>{option.caption}</span><span className={styles.selected} aria-hidden="true">{selected === index ? "✓" : ""}</span></button>)}</div> : <div className={styles.placeholders} aria-label="Captions are being created">{Array.from({ length: 5 }, (_, index) => <div key={index}><span>{String(index + 1).padStart(2, "0")}</span><i /></div>)}</div>}
           <div className={styles.publish}>
             {publishError && <p role="alert" className={styles.error}>{publishError}</p>}
-            {photoId ? !celebrating && <div className={styles.publishedActions}><button className={styles.createAnother} onClick={createAnother}>Create Another Meme</button>{galleryUrl && <a className={styles.primary} href={`${galleryUrl}?sort=newest#photo-${photoId}`}>View in gallery <span aria-hidden="true">↗</span></a>}</div> : <button className={styles.primary} disabled={!result || locked} onClick={() => void publish()}>{publishing ? "Publishing…" : confirmed ? "Retry publishing" : "Publish to gallery"}<span aria-hidden="true">→</span></button>}
+            {photoId ? !celebrating && <div className={styles.publishedActions}><button className={styles.createAnother} onClick={createAnother}>Create Another Meme</button>{destination && <a className={styles.primary} href={destination}>{destinationLabel}<span aria-hidden="true">↗</span></a>}</div> : <button className={styles.primary} disabled={!result || locked} onClick={() => void publish()}>{publishing ? "Publishing…" : confirmed ? "Retry publishing" : result?.mediaId || editing ? "Save caption" : "Publish to gallery"}<span aria-hidden="true">→</span></button>}
           </div>
         </section>
       </div>
     </> : <div className={styles.uploadPage}>
-      <header className={styles.hero}><h1>Make it a meme<span>.</span></h1><span className={styles.microcopy}>TURN MOMENTS<br />INTO MEMES</span></header>
+      <header className={styles.hero}><h1>{editing ? "Change your caption" : "Make it a meme"}<span>.</span></h1><span className={styles.microcopy}>TURN MOMENTS<br />INTO MEMES</span></header>
+      {missingOriginal && <p className={styles.sourceNotice}>The original photo wasn’t saved for this meme. Upload the photo without captions to continue.</p>}
       <div className={`${styles.dropzone} ${dragging ? styles.dragging : ""}`} role="group" aria-label="Photo upload"
         onDragOver={event => { event.preventDefault(); if (!locked) setDragging(true); }}
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
@@ -222,10 +260,11 @@ export function DisguiseStudio({ configured, userId, galleryUrl }: { configured:
           </> : <><span className={styles.uploadIcon} aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><rect x="4" y="5" width="24" height="22" rx="4" stroke="currentColor" strokeWidth="1.5" /><circle cx="12" cy="12" r="2" fill="currentColor" /><path d="m5 23 7-7 5 5 4-4 6 6M23 3v8m-4-4 4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>{reading ? "Reading your photo…" : dragging ? "Drop it here" : "Upload or drag a photo"}</strong><span className={styles.fileHelp}>JPG or PNG · 2 MB max</span></>}
         </button>
       </div>
-      <div className={styles.uploadActions}><div className={styles.keyword}><label htmlFor="factory-direction">Keyword <span>(optional)</span></label><input id="factory-direction" maxLength={500} placeholder="Finals week, first dates, office life…" value={direction} disabled={locked} onChange={event => setDirection(event.target.value)} /></div>
-      {!configured && <p role="alert" className={styles.error}>Meme creation is currently unavailable.</p>}
+      <div className={styles.modeChoice} role="group" aria-label="Caption method"><button type="button" aria-pressed={mode === "manual"} disabled={locked} onClick={() => setMode("manual")}>Write my own caption</button><button type="button" aria-pressed={mode === "ai"} disabled={locked} onClick={() => setMode("ai")}>Generate with AI</button></div>
+      <div className={styles.uploadActions}><div className={styles.keyword}>{mode === "manual" ? <><label htmlFor="factory-caption">Your caption</label><textarea id="factory-caption" maxLength={180} rows={2} placeholder="Write your caption…" value={caption} disabled={locked} onChange={event => setCaption(event.target.value)} /></> : <><label htmlFor="factory-direction">Keyword <span>(optional)</span></label><input id="factory-direction" maxLength={500} placeholder="Finals week, first dates, office life…" value={direction} disabled={locked} onChange={event => setDirection(event.target.value)} /></>}</div>
+      {!configured && mode === "ai" && <p role="alert" className={styles.error}>AI captions are currently unavailable. You can write your own caption.</p>}
       {errorPanel}
-      <button className={styles.primary} disabled={!configured || !source || reading || locked} onClick={() => void generate()}>Create meme <span aria-hidden="true">→</span></button></div>
+      <button className={styles.primary} disabled={(mode === "ai" && !configured) || (mode === "manual" && !caption.trim()) || !source || reading || locked} onClick={() => void generate()}>Create meme <span aria-hidden="true">→</span></button></div>
     </div>}
   </main>;
 }

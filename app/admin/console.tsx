@@ -60,7 +60,7 @@ export function AdminConsole({ section, params, data }: Props) {
 
     <div className={styles.tableWrap}><table className={styles.table}>
       <caption className={styles.srOnly}>{section === "users" ? "User accounts and profiles" : "Saved media and vote totals"}</caption>
-      <thead><tr>{(section === "users" ? ["Account", "Profile", "Status", "Created"] : ["Preview", "Captions", "Owner & details", "Votes", "Actions"]).map(heading => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
+      <thead><tr>{(section === "users" ? ["Account", "Profile", "Status", "Created"] : ["Preview", "Caption", "Owner & details", "Votes", "Actions"]).map(heading => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
       <tbody>
         {section === "users" && (data.items as AdminAccount[]).map(user => <tr key={user.id}>
           <td><strong>{user.email ?? "No email"}</strong><code>{user.id}</code></td>
@@ -70,13 +70,9 @@ export function AdminConsole({ section, params, data }: Props) {
         </tr>)}
         {section === "media" && (data.items as AdminMedia[]).map(media => <tr key={media.id}>
           <td>{/* eslint-disable-next-line @next/next/no-img-element -- Authenticated previews must bypass the public image optimizer. */}
-            <img className={styles.preview} src={`/api/admin/media/${media.id}/preview`} alt={media.title || "Saved media"} width={112} height={90} loading="lazy" /><code>{media.id}</code></td>
-          <td><form key={`${media.id}:${media.title}:${media.description}`} onSubmit={async event => { event.preventDefault(); const form = new FormData(event.currentTarget); await run(`/api/admin/media/${media.id}`, json("PATCH", { title: form.get("title"), description: form.get("description") }), "Captions saved."); }}>
-            <label>Title<input name="title" maxLength={100} defaultValue={media.title} aria-label={`Title for ${media.id}`} disabled={locked} /></label>
-            <label>Description<textarea name="description" maxLength={1000} defaultValue={media.description} rows={2} aria-label={`Description for ${media.id}`} disabled={locked} /></label>
-            <button disabled={locked} type="submit">Save captions</button>
-          </form></td>
-          <td>{media.owner_name || "Unnamed owner"}<code>{media.contributor_id}</code><small>{media.source} · {media.published_at ? "Published" : "Private"}</small><small>Created: {date(media.created_at)}</small>{media.published_at && <small>Published: {date(media.published_at)}</small>}</td>
+            <img className={styles.preview} src={`/api/admin/media/${media.id}/preview`} alt={media.description || media.title || "Saved media"} width={300} height={240} loading="lazy" /></td>
+          <td className={styles.captionCell}><p className={styles.caption}>{media.description || media.title || "No caption"}</p><Link className={styles.changeCaption} href={`/disguise?media=${media.id}`}>Change caption</Link></td>
+          <td>{media.owner_name || "Unnamed owner"}<small>{media.source} · {media.published_at ? "Published" : "Private"}</small><small>Created: {date(media.created_at)}</small>{media.published_at && <small>Published: {date(media.published_at)}</small>}</td>
           <td><span>↑ {media.upvotes}</span><small>↓ {media.downvotes}</small></td>
           <td><div className={styles.rowActions}>{!media.published_at && <button disabled={locked} onClick={() => void run(`/api/admin/media/${media.id}/publish`, { method: "POST" }, "Image published to the gallery.")}>Publish</button>}<button className={styles.danger} disabled={locked} onClick={() => setDeleting(media)}>Delete</button></div></td>
         </tr>)}

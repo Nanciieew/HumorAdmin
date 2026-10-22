@@ -7,6 +7,8 @@ import { isUuid } from "../gallery-types";
 import { generateMemeCaptions } from "./captions";
 import { CaptionLayoutError, renderFactoryMemes } from "./render";
 import type { FactoryBatch, FactoryPreview } from "./types";
+import { batchOriginalPath, originalPath, retainFactoryOriginal } from "./original";
+import { recaptionTarget, replaceMediaCaption } from "../admin/recaption";
 
 const bucket = () => supabase.storage.from("generated-images");
 export function factoryPath(userId: string, batchId: string, index: number) { return `${userId}/factory/${batchId}/${index}.webp`; }
@@ -27,10 +29,12 @@ export async function previewFactoryBatch(batch: FactoryBatch): Promise<FactoryP
     if (signed.error) throw new ImageGenerationError("Couldn’t load a meme preview. Please try again.", 503);
     return { caption: variant.caption, url: signed.data.signedUrl };
   }));
-  return { id: batch.id, variants, expiresAt: batch.expires_at, selected: batch.selected, ...(batch.state === "published" && batch.cleaned_at ? { photoId: batch.id } : {}) };
+  const mediaId = batch.variants[0]?.replaces?.id;
+  return { id: batch.id, variants, expiresAt: batch.expires_at, selected: batch.selected, ...(mediaId ? { mediaId } : {}), ...(batch.state === "published" && batch.cleaned_at ? { photoId: mediaId ?? batch.id } : {}) };
 }
 export async function removeFactoryCache(batch: FactoryBatch, keep: number | null = null) {
   const paths = Array.from({ length: 5 }, (_, index) => factoryPath(batch.user_id, batch.id, index)).filter((_, index) => index !== keep);
+  paths.push(batchOriginalPath(batch.user_id, batch.id));
   const removed = await bucket().remove(paths);
   if (removed.error) throw new ImageGenerationError("Unused preview cleanup is pending. Please retry.", 503);
 }
@@ -40,12 +44,17 @@ async function finishFactoryCleanup(batch: FactoryBatch, selected: number) {
   if (saved.error) throw new ImageGenerationError("Your meme is published. Retry to confirm preview cleanup.", 503);
 }
 export async function generateFactoryBatch(userId: string, input: unknown, signal?: AbortSignal) {
-  const body = input as { id?: unknown; image?: unknown; direction?: unknown; approved?: unknown } | null;
+  const body = input as { id?: unknown; image?: unknown; direction?: unknown; approved?: unknown; mode?: unknown; caption?: unknown; mediaId?: unknown } | null;
   if (!isUuid(body?.id) || body?.approved !== true) throw new ImageGenerationError("Choose a photo and agree to AI generation first.");
   if (typeof body.direction !== "string" || body.direction.length > 500) throw new ImageGenerationError("Use a direction up to 500 characters.");
+  const manual = body.mode === "manual";
+  if (body.mode !== undefined && !["manual", "ai"].includes(body.mode as string)) throw new ImageGenerationError("Choose manual or AI captions.");
+  if (manual && (typeof body.caption !== "string" || !body.caption.trim() || body.caption.trim().length > 180)) throw new ImageGenerationError("Write a caption between 1 and 180 characters.");
+  if (body.mediaId !== undefined && !isUuid(body.mediaId)) throw new ImageGenerationError("Media not found.", 404);
+  const replaces = body.mediaId ? await recaptionTarget(body.mediaId as string) : undefined;
   const image = await validateSeedreamReference(body.image);
   if (!image) throw new ImageGenerationError("Choose a still JPG or PNG up to 2 MB and 24 megapixels.");
-  if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_MODEL) throw new ImageGenerationError("Meme generation is not configured.", 503);
+  if (!manual && (!process.env.GEMINI_API_KEY || !process.env.GEMINI_MODEL)) throw new ImageGenerationError("Meme generation is not configured.", 503);
   // Expire stuck jobs before the one-active-generation constraint is checked.
   const stale = await supabase.from("factory_batches").update({ state: "discarded" }).eq("user_id", userId).eq("state", "generating").lt("created_at", new Date(Date.now() - 10 * 60_000).toISOString());
   if (stale.error) throw new ImageGenerationError("Couldn’t start this batch. Please try again.", 503);
@@ -63,15 +72,18 @@ export async function generateFactoryBatch(userId: string, input: unknown, signa
   signal = signal ? AbortSignal.any([signal, AbortSignal.timeout(155_000)]) : AbortSignal.timeout(155_000);
   let finalized = false;
   try {
+    const original = await bucket().upload(batchOriginalPath(userId, id), Buffer.from(image.slice(image.indexOf(",") + 1), "base64"), { contentType: image.startsWith("data:image/png;") ? "image/png" : "image/jpeg" });
+    if (original.error) throw new ImageGenerationError("Couldn’t save the original photo. Please try again.", 503);
     let captions: string[] = [];
     let images: Buffer[] = [];
     // Ask for shorter copy if a caption cannot fit. Never shrink the font,
     // move the caption, or alter the original to accommodate the wording.
     for (let attempt = 0; attempt < 2; attempt++) {
-      captions = await generateMemeCaptions(image, body.direction.trim(), signal, attempt > 0);
+      captions = manual ? [(body.caption as string).trim()] : await generateMemeCaptions(image, body.direction.trim(), signal, attempt > 0);
       try { images = await renderFactoryMemes(image, captions, signal); break; }
       catch (error) {
         if (!(error instanceof CaptionLayoutError)) throw error;
+        if (manual) throw new ImageGenerationError("This caption doesn’t fit the fixed meme layout. Use shorter words or a shorter caption.");
         if (attempt === 1) throw new ImageGenerationError("The captions couldn’t fit the fixed meme layout. Please try again with a shorter keyword.", 502);
       }
     }
@@ -83,7 +95,7 @@ export async function generateFactoryBatch(userId: string, input: unknown, signa
       const path = factoryPath(userId, id, index);
       const saved = await bucket().upload(path, bytes, { contentType: "image/webp" });
       if (saved.error) throw new ImageGenerationError("Couldn’t cache a meme. Please try again.", 503);
-      return { caption, path };
+      return { caption, path, originalSaved: true, ...(replaces ? { replaces } : {}) };
     }));
     const failed = results.find(result => result.status === "rejected");
     if (failed?.status === "rejected") throw failed.reason;
@@ -107,10 +119,10 @@ export async function publishFactoryBatch(userId: string, id: string, selected: 
   if (batch.state === "published") {
     if (batch.selected !== index) throw new ImageGenerationError("This batch has already been published with another caption.", 409);
     await finishFactoryCleanup(batch, index);
-    return { photoId: id };
+    return { photoId: batch.variants[index].replaces?.id ?? id };
   }
   if (Date.parse(batch.expires_at) <= Date.now()) throw new ImageGenerationError("These previews expired. Generate a new batch.", 410);
-  if (!["ready", "publishing"].includes(batch.state) || batch.variants.length !== 5) throw new ImageGenerationError("This batch is not ready to publish.", 409);
+  if (!["ready", "publishing"].includes(batch.state) || ![1, 5].includes(batch.variants.length) || index >= batch.variants.length) throw new ImageGenerationError("This batch is not ready to publish.", 409);
   if (batch.selected !== null && batch.selected !== index) throw new ImageGenerationError("Your caption is already confirmed. Retry publishing the confirmed version.", 409);
   if (batch.state === "publishing" && batch.lease_until && Date.parse(batch.lease_until) > Date.now()) throw new ImageGenerationError("This meme is already being published. Please try again shortly.", 409);
   const lease = new Date(Date.now() + 120_000).toISOString();
@@ -120,16 +132,22 @@ export async function publishFactoryBatch(userId: string, id: string, selected: 
   const locked = await claim.select("*").maybeSingle();
   if (locked.error || !locked.data) throw new ImageGenerationError("Another request is publishing this meme. Please try again shortly.", 409);
   batch = locked.data as FactoryBatch;
+  const photoId = batch.variants[index].replaces?.id ?? id;
   try {
     const variant = batch.variants[index];
-    const existing = await supabase.from("images").select("id,private_storage_path,contributor_id").eq("id", id).maybeSingle();
-    if (existing.error) throw new Error("Couldn’t check the selected meme.");
-    if (existing.data && (existing.data.contributor_id !== userId || existing.data.private_storage_path !== variant.path)) throw new Error("Selected meme does not match the confirmed version.");
-    if (!existing.data) {
-      const saved = await supabase.from("images").insert({ id, contributor_id: userId, source: "generated", private_storage_path: variant.path, title: variant.caption.slice(0, 100), description: variant.caption });
-      if (saved.error) throw new Error("Couldn’t save the selected meme. Please retry publishing.");
+    if (variant.replaces) {
+      await replaceMediaCaption(batch, index);
+    } else {
+      const existing = await supabase.from("images").select("id,private_storage_path,contributor_id").eq("id", id).maybeSingle();
+      if (existing.error) throw new Error("Couldn’t check the selected meme.");
+      if (existing.data && (existing.data.contributor_id !== userId || existing.data.private_storage_path !== variant.path)) throw new Error("Selected meme does not match the confirmed version.");
+      if (!existing.data) {
+        const saved = await supabase.from("images").insert({ id, contributor_id: userId, source: "generated", private_storage_path: variant.path, title: variant.caption.slice(0, 100), description: variant.caption });
+        if (saved.error) throw new Error("Couldn’t save the selected meme. Please retry publishing.");
+      }
+      await retainFactoryOriginal(userId, id, userId, id, variant.originalSaved);
+      await publishGalleryImage(userId, id, "generated");
     }
-    await publishGalleryImage(userId, id, "generated");
     const published = await supabase.from("factory_batches").update({ state: "published", lease_until: null }).eq("id", id).eq("lease_until", lease).select("*").single();
     if (published.error) throw new Error("Your meme was published. Retry to finish preview cleanup.");
     batch = published.data as FactoryBatch;
@@ -138,7 +156,7 @@ export async function publishFactoryBatch(userId: string, id: string, selected: 
     throw error;
   }
   await finishFactoryCleanup(batch, index);
-  return { photoId: id };
+  return { photoId };
 }
 export async function discardFactoryBatch(userId: string, id: string) {
   const batch = await readFactoryBatch(userId, id);
@@ -167,6 +185,8 @@ export async function cleanupFactoryBatches() {
     if (image.data && !image.data.published_at) {
       const removed = await supabase.from("images").delete().eq("id", batch.id).eq("contributor_id", batch.user_id).is("published_at", null);
       if (removed.error) throw new Error("Factory cleanup could not remove an expired draft.");
+      const original = await bucket().remove([originalPath(batch.user_id, batch.id)]);
+      if (original.error) throw new Error("Factory cleanup could not remove an expired original.");
     }
     const deleted = await supabase.from("factory_batches").delete().eq("id", batch.id);
     if (deleted.error) throw new Error("Factory cleanup could not remove an expired batch.");

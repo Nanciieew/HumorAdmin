@@ -16,6 +16,8 @@ const generateRoute = await import('../app/api/admin/media/generate/route.ts');
 const itemRoute = await import('../app/api/admin/media/[id]/route.ts');
 const publishRoute = await import('../app/api/admin/media/[id]/publish/route.ts');
 const previewRoute = await import('../app/api/admin/media/[id]/preview/route.ts');
+const originalRoute = await import('../app/api/admin/media/[id]/original/route.ts');
+const {loadRecaptionSource,recaptionTarget,replaceMediaCaption} = await import('../lib/admin/recaption.ts');
 const { adminReturnPath } = await import('../lib/auth/return-path.ts');
 
 const adminId = randomUUID(), ownerId = randomUUID(), id = randomUUID();
@@ -88,6 +90,7 @@ test('all entry points deny anonymous, non-admin, missing-profile, non-Google, r
     () => itemRoute.DELETE(request(`/api/admin/media/${id}`, 'DELETE', { confirmed: true }), context()),
     () => publishRoute.POST(request(`/api/admin/media/${id}/publish`, 'POST'), context()),
     () => previewRoute.GET(request(`/api/admin/media/${id}/preview`), context()),
+    () => originalRoute.GET(request(`/api/admin/media/${id}/original`), context()),
   ];
   const google = structuredClone(user);
   for (const state of [
@@ -199,4 +202,49 @@ test('publication reuses owner-scoped publication and remains idempotent', async
 test('only safe admin destinations survive login; ordinary login keeps the welcome flow', () => {
   assert.equal(adminReturnPath('/admin/media?page=2'), '/admin/media?page=2');
   for (const value of ['//evil.test/admin', 'https://evil.test/admin', '/admin\\evil', '/admin\r\n', '/administrator', '/gallery', null]) assert.equal(adminReturnPath(value), null);
+});
+
+test('original photo reads are protected and missing legacy originals never fall back to captioned images', async () => {
+  seed();
+  const missing = await originalRoute.GET(request(`/api/admin/media/${id}/original`), context());
+  assert.equal(missing.status,200);assert.equal((await missing.json()).image,null);
+  objects.set(`generated-images/${ownerId}/originals/${id}`,png);
+  const response=await originalRoute.GET(request(`/api/admin/media/${id}/original`),context());
+  assert.equal(response.headers.get('cache-control'),'private, no-store');
+  assert.equal((await response.json()).image,`data:image/png;base64,${png.toString('base64')}`);
+  flag=false;await assert.rejects(loadRecaptionSource(id),error=>error.status===403);
+  await assert.rejects(recaptionTarget(id),error=>error.status===403);
+});
+
+test('changing a caption switches the rendered image and text together while retaining identity, owner, votes and publication status', async () => {
+  for(const source of ['generated','upload']) {
+    const row=seed();row.source=source;row.upvotes='9';row.downvotes='2';row.published_at='2026-10-20T12:00:00Z';
+    row.public_storage_path=`${ownerId}/old-public.webp`;
+    if(source==='upload')row.private_storage_path=null;
+    const target=await recaptionTarget(id),batchId=randomUUID(),path=`${adminId}/factory/${batchId}/0.webp`;
+    objects.set(`generated-images/${path}`,png);
+    objects.set(`generated-images/${adminId}/factory/${batchId}/original`,png);
+    const batch={id:batchId,user_id:adminId,variants:[{caption:'New caption',path,replaces:target,originalSaved:true}]};
+    assert.equal(await replaceMediaCaption(batch,0),id);
+    assert.equal(rows.size,1);assert.equal(row.id,id);assert.equal(row.contributor_id,ownerId);
+    assert.equal(row.source,source);assert.equal(row.upvotes,'9');assert.equal(row.downvotes,'2');
+    assert.equal(row.published_at,'2026-10-20T12:00:00Z');assert.equal(row.description,'New caption');
+    assert.deepEqual(objects.get(`gallery-photos/${row.public_storage_path}`),png);
+    assert.equal(row.private_storage_path,source==='generated'?`${ownerId}/recaption/${batchId}.webp`:null);
+    assert.deepEqual(objects.get(`generated-images/${ownerId}/originals/${batchId}`),png);
+    assert.equal((await loadRecaptionSource(id)).image,`data:image/png;base64,${png.toString('base64')}`);
+    assert.equal(await replaceMediaCaption(batch,0),id,'a retry keeps the same media record');
+  }
+});
+
+test('private caption changes stay private, and stale editors or revoked admins cannot replace media', async () => {
+  const row=seed(),target=await recaptionTarget(id),batchId=randomUUID(),path=`${adminId}/factory/${batchId}/0.webp`;
+  objects.set(`generated-images/${path}`,png);
+  const batch={id:batchId,user_id:adminId,variants:[{caption:'New caption',path,replaces:target}]};
+  flag=false;await assert.rejects(replaceMediaCaption(batch,0),error=>error.status===403);
+  flag=true;await replaceMediaCaption(batch,0);
+  assert.equal(row.published_at,null);assert.equal(row.public_storage_path,null);
+  const stale={...batch,id:randomUUID()};
+  await assert.rejects(replaceMediaCaption(stale,0),error=>error.status===409);
+  assert.equal(row.description,'New caption');
 });
