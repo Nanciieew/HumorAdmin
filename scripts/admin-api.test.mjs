@@ -285,3 +285,18 @@ test('broken, foreign and changed original links fail without loading a captione
  await assert.rejects(replaceMediaCaption(batch,0),error=>error.status===409);
  assert.equal(row.description,'Original');
 });
+
+test('generated media stays scoped to generated images while the images page reads every source',async()=>{
+ const {default:MediaPage}=await import('../app/admin/media/page.tsx');
+ const {default:ImagesPage}=await import('../app/admin/images/page.tsx');
+ for(const source of ['', 'upload', 'generated']){
+  calls=[];
+  const page=await MediaPage({searchParams:Promise.resolve({source})});
+  assert.equal(page.props.section,'media');
+  assert.equal(calls.find(call=>call.name==='admin_media_page').args.p_source,'generated');
+ }
+ calls=[];
+ const page=await ImagesPage({searchParams:Promise.resolve({})});
+ assert.equal(page.props.section,'images');
+ assert.equal(calls.find(call=>call.name==='admin_media_page').args.p_source,null);
+});

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "check:admin-reads": "node --env-file=.env.local --import tsx scripts/admin-read-check.mjs",
     "test:admin": "node --test scripts/admin-db.test.mjs scripts/admin-catalog-db.test.mjs && node --conditions=react-server --import tsx --import ./scripts/admin-test-loader.mjs --test scripts/admin-api.test.mjs scripts/admin-catalog-api.test.mjs && node --import tsx --import ./scripts/roast-css-loader.mjs --test scripts/admin-ui.test.mjs",
     "dev": "next dev",
     "build": "next build --webpack",

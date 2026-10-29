@@ -99,3 +99,47 @@ test('images expose multipart upload and edit details, then refresh after saving
   await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Save details'}));});
   assert.equal(calls[1].options.method,'PATCH');assert.deepEqual(JSON.parse(calls[1].options.body),{title:media.title,description:'New metadata'});assert.equal(refreshed,2);
 });
+
+test('steps and models show named links instead of unlabelled foreign keys',()=>{
+ const providerId='30000000-0000-4000-8000-000000000001';
+ let ui=mountResource('prompt-chain-steps',[{id:media.id,name:'Generate roast',position:0,prompt_chain_id:admin.id,llm_model_id:providerId,system_prompt:'Be specific.',user_prompt:'Use the frames.',chain:{id:admin.id,name:'Live roast'},model_record:{id:providerId,name:'Gemini Flash'},created_at:'2026-10-29T13:00:00Z'}]);
+ assert.equal(ui.getByRole('link',{name:'Live roast'}).getAttribute('href'),`/admin/prompt-chains?id=${admin.id}`);
+ assert.equal(ui.getByRole('link',{name:'Gemini Flash'}).getAttribute('href'),`/admin/llm-models?id=${providerId}`);
+ fireEvent.click(ui.getByText('View full record'));
+ assert.ok(ui.getByRole('region',{name:'Step prompts'}).textContent.includes('Be specific.'));
+ cleanup();
+ ui=mountResource('llm-models',[{id:media.id,name:'Gemini Flash',model_id:'gemini-flash',llm_provider_id:providerId,provider_record:{id:providerId,name:'Google Gemini'},enabled:true}]);
+ assert.equal(ui.getByRole('link',{name:'Google Gemini'}).getAttribute('href'),`/admin/llm-providers?id=${providerId}`);
+ assert.equal(ui.getByRole('link',{name:'Requests'}).getAttribute('href'),`/admin/generation-requests?llm_model_id=${media.id}`);
+});
+test('request records display the actual sent prompts and saved mix with links to the correct responses',async()=>{
+ const row={id:media.id,user_id:admin.id,source:'getchecked',status:'succeeded',model:'gemini-flash',attempt:1,created_at:'2026-10-29T13:00:00Z',request:{systemInstruction:{parts:[{text:'Recorded system prompt'}]},contents:[{parts:[{text:'Recorded user prompt'}]}],generationConfig:{maxOutputTokens:2048}},prompt_snapshot:{name:'Recorded step'},mix_snapshot:{entry:{weight:3,enabled:true}}};
+ const ui=mountResource('generation-requests',[row]);
+ fireEvent.click(ui.getByText('View full record'));
+ assert.match(ui.getByRole('region',{name:'Recorded input'}).textContent,/Recorded system prompt.*Recorded user prompt.*2048/s);
+ assert.match(ui.getByRole('region',{name:'Recorded prompt and mix'}).textContent,/Recorded step.*"weight": 3/s);
+ assert.equal(ui.getByRole('link',{name:'LLM responses'}).getAttribute('href'),`/admin/llm-responses?request_id=${media.id}`);
+ assert.equal(ui.getByRole('link',{name:'User'}).getAttribute('href'),`/admin/users?search=${admin.id}`);
+ assert.match(ui.container.querySelector('time').textContent,/9:00 AM/);
+ await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Refresh records'}));});
+ assert.equal(refreshed,1);
+});
+test('responses show public output, zero duration, usage, and the associated recorded request',()=>{
+ const ui=mountResource('llm-responses',[{id:media.id,request_id:admin.id,model:'gemini-flash',status:'succeeded',duration_ms:0,http_status:200,response:{candidates:[{content:{parts:[{thought:true,text:'hidden thought'},{text:'Actual public response'}]}}]},usage:{promptTokenCount:42},request_record:{id:admin.id,source:'getchecked',request:{prompt:'Associated input'},prompt_snapshot:{name:'Saved step'},mix_snapshot:{entry:{weight:2}}}}]);
+ fireEvent.click(ui.getByText('View full record'));
+ assert.equal(ui.getByRole('link',{name:'View request'}).getAttribute('href'),`/admin/generation-requests?id=${admin.id}`);
+ assert.ok(ui.getByText('0 ms'));
+ const output=ui.getByRole('region',{name:'Provider result'});
+ assert.match(output.textContent,/Actual public response.*42/s);assert.ok(!output.textContent.includes('hidden thought'));
+ assert.match(ui.getByRole('region',{name:'Recorded input'}).textContent,/Associated input/);
+});
+test('empty audit tables are distinguished from filtered results and filters survive pagination',()=>{
+ let ui=mountResource('generation-requests');
+ assert.ok(ui.getByText('No generation requests have been recorded in this Supabase project yet.'));
+ cleanup();
+ ui=mountResource('generation-requests',[],'30','status=failed&source=getchecked');
+ assert.ok(ui.getByText('No matching records.'));
+ assert.equal(ui.getByRole('combobox',{name:'Status'}).value,'failed');
+ assert.equal(ui.getByRole('textbox',{name:'Source'}).value,'getchecked');
+ assert.equal(ui.getByRole('link',{name:'Next →'}).getAttribute('href'),'/admin/generation-requests?status=failed&source=getchecked&page=2');
+});

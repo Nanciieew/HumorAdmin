@@ -75,3 +75,38 @@ test('generation screens read all AI calls and filter responses using the canoni
  assert.deepEqual(calls.find(call=>call[0]==='eq'),['eq','request_id',id]);
  assert.ok(calls.find(call=>call[0]==='select')[1].includes('duration_ms'));
 });
+
+test('request detail links select exactly one record and preserve joined Supabase data',async()=>{
+ result.data=[{id,source:'getchecked',status:'succeeded',chain:{id,name:'Live roast'},step:{id,name:'Generate roast'}}];
+ const response=await route.GET(new Request(`https://app.test/api/admin/resources/generation-requests?id=${id}`),context('generation-requests'));
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.equal(body.items[0].chain.name,'Live roast');
+ assert.deepEqual(calls.find(call=>call[0]==='eq'),['eq','id',id]);
+ const selected=calls.find(call=>call[0]==='select')[1];
+ assert.match(selected,/chain:prompt_chains!prompt_chain_id/);
+ assert.match(selected,/step:prompt_chain_steps!prompt_chain_step_id/);
+ assert.match(selected,/model_record:llm_models!llm_model_id/);
+});
+test('model, chain, provider, and response filters use their own foreign keys and keep pagination',async()=>{
+ for(const [slug,key] of [['generation-requests','llm_model_id'],['generation-requests','prompt_chain_id'],['llm-models','llm_provider_id'],['llm-responses','generation_request_id']]){
+  calls=[];
+  await server.listResource(slug,new URLSearchParams({[key]:id,page:'2',limit:'10'}));
+  assert.deepEqual(calls.find(call=>call[0]==='eq'),['eq',key,id]);
+  assert.deepEqual(calls.find(call=>call[0]==='range'),['range',10,19]);
+ }
+ calls=[];
+ await server.listResource('generation-requests',new URLSearchParams({status:'failed',source:'getchecked'}));
+ assert.deepEqual(calls.filter(call=>call[0]==='eq'),[['eq','status','failed'],['eq','source','getchecked']]);
+});
+test('invalid request filters are rejected before database work, and database errors never become empty success',async()=>{
+ for(const params of ['id=invalid','status=unknown','prompt_chain_id=invalid','llm_model_id=invalid']){
+  calls=[];
+  await assert.rejects(server.listResource('generation-requests',new URLSearchParams(params)),error=>error.status===400);
+  assert.equal(calls.length,0);
+ }
+ result={data:null,count:null,error:{code:'42P01',message:'internal schema details'}};
+ const response=await route.GET(request(),context('generation-requests'));
+ assert.equal(response.status,503);
+ assert.ok(!(await response.text()).includes('internal schema details'));
+});

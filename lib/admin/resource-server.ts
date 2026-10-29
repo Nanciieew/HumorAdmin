@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { isUuid } from "@/lib/gallery-types";
 import { AdminError, requireAdmin } from "./auth";
 import { pagination } from "./server";
-import { findAdminResource, type AdminResource, type ResourceRow } from "./resources";
+import { findAdminResource, resourceSelection, resourceFilters, type AdminResource, type ResourceRow } from "./resources";
 import type { AdminPage } from "./types";
 
 function resourceFor(slug: string) {
@@ -59,13 +59,17 @@ export async function listResource(slug: string, params: URLSearchParams): Promi
   const resource = resourceFor(slug), { p_offset, p_limit } = pagination(params);
   const search = (params.get("search") ?? "").trim();
   if (search.length > 200) throw new AdminError("Use a search of up to 200 characters.");
-  let query = supabase.from(resource.table).select(resource.columns.join(","), { count: "exact" });
+  const filters = resourceFilters(resource).flatMap(filter => {
+    const value = (params.get(filter.column) ?? "").trim();
+    if (!value) return [];
+    if ((filter.kind ?? "uuid") === "uuid" && !isUuid(value)) throw new AdminError(`Enter a valid ${filter.label.toLowerCase()}.`);
+    if (filter.kind === "enum" && !filter.options?.includes(value)) throw new AdminError(`Choose a valid ${filter.label.toLowerCase()}.`);
+    if (value.length > 200) throw new AdminError(`Use a ${filter.label.toLowerCase()} of up to 200 characters.`);
+    return [{ column: filter.column, value }];
+  });
+  let query = supabase.from(resource.table).select(resourceSelection(resource), { count: "exact" });
   if (search && resource.search) query = query.ilike(resource.search, `%${search.replace(/[\\%_]/g, "\\$&")}%`);
-  if (resource.filter && params.get(resource.filter)) {
-    const value = params.get(resource.filter);
-    if (!isUuid(value)) throw new AdminError("Enter a valid filter ID.");
-    query = query.eq(resource.filter, value);
-  }
+  for (const filter of filters) query = query.eq(filter.column, filter.value);
   if (slug === "prompt-chain-steps") query = query.order("prompt_chain_id").order("position");
   else query = query.order("created_at", { ascending: false });
   const result = await query.order("id").range(p_offset, p_offset + p_limit - 1);
@@ -76,7 +80,7 @@ export async function readResource(slug: string, id: string) {
   await requireAdmin();
   const resource = resourceFor(slug);
   if (!isUuid(id)) throw new AdminError("Record not found.", 404);
-  const result = await supabase.from(resource.table).select(resource.columns.join(",")).eq("id", id).maybeSingle();
+  const result = await supabase.from(resource.table).select(resourceSelection(resource)).eq("id", id).maybeSingle();
   if (result.error) throw databaseError(result.error);
   if (!result.data) throw new AdminError("Record not found.", 404);
   return result.data;
@@ -88,7 +92,7 @@ export async function writeResource(slug: string, body: unknown, id?: string) {
   if (id && !isUuid(id)) throw new AdminError("Record not found.", 404);
   const values = resourceValues(resource, body, !id);
   const table = supabase.from(resource.table);
-  const result = await (id ? table.update(values).eq("id", id) : table.insert(values)).select(resource.columns.join(",")).maybeSingle();
+  const result = await (id ? table.update(values).eq("id", id) : table.insert(values)).select(resourceSelection(resource)).maybeSingle();
   if (result.error) throw databaseError(result.error);
   if (!result.data) throw new AdminError("Record not found.", 404);
   return result.data;
