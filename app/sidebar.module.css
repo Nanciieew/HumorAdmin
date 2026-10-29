@@ -55,5 +55,48 @@
 }
 
 /* Keep every admin destination reachable in a tall catalog. */
-.sidebar:global(.app-sidebar) :global(.sidebar-links){overflow-y:auto;min-height:0;flex:1;gap:6px;overscroll-behavior:contain}
+.sidebar:global(.app-sidebar) :global(.sidebar-links){display:flex;flex-direction:column;overflow-y:auto;min-height:0;flex:1;gap:6px;overscroll-behavior:contain}
 .sidebar:global(.app-sidebar) :global(.sidebar-links) a{flex-shrink:0}
+
+.group { flex-shrink: 0; }
+.groupToggle {
+  display: grid;
+  grid-template-columns: calc(var(--rail-slot) - 2px) minmax(0, 1fr) 22px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+  text-align: left;
+}
+.groupToggle:hover { background: var(--surface-raised); color: var(--foreground); }
+.groupToggle[data-active="true"] { color: var(--accent); }
+.groupToggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.groupLabel { line-height: 1.4; }
+.chevron { justify-self: center; }
+.chevron[data-expanded="true"] { transform: rotate(90deg); }
+.subLinks {
+  display: grid;
+  gap: 3px;
+  margin: 4px 0 8px calc((var(--rail-slot) - 2px) / 2);
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--line);
+  list-style: none;
+}
+.subLinks[hidden] { display: none; }
+.sidebar:global(.app-sidebar) :global(.sidebar-links) .subLinks a {
+  display: block;
+  min-height: 40px;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.sidebar[data-collapsed="true"] .groupToggle { grid-template-columns: 1fr; }
+.sidebar[data-collapsed="true"] .groupLabel,
+.sidebar[data-collapsed="true"] .chevron { display: none; }
