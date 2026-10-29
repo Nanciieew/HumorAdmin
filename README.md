@@ -47,7 +47,7 @@ Set `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`,
 `USER_SITE_URL` points to `https://thehumorproject-five.vercel.app`. Checkboard and other remaining user-site destinations use uncached temporary
 redirects to that deployment. The admin app has no Gallery page or Gallery
 navigation. Factory publication links open the original Gallery directly. The
-Control room Media page manages saved records without a media-creation form. Each deployment has its own browser session. The original site
+Control room AI generated media page previews saved media. The Images page supports image uploads, metadata edits, publication, and deletion. Each deployment has its own browser session. The original site
 reads Supabase per request without a persistent Next data cache; Gallery and
 Checkboard also refresh on focus and every 15 seconds. Cross-project invalidation
 is therefore based on fresh reads, without an anonymous revalidation endpoint.
@@ -95,6 +95,42 @@ The build uses webpack, supports Node/sharp/OpenType, and explicitly traces the
 original Anton font into the Factory function. Neither workflow uses Edge or
 static export. Fonts, original model configuration, prompts, pixel rendering,
 publication bytes and concurrency behavior are preserved.
+
+
+## Admin catalogs
+
+The sidebar provides read-only users/profiles, prompt chains, ordered chain steps,
+Factory generation requests, and recorded LLM responses. Prompt chain mix entries
+support weight and enabled-state updates. Terms, AI generation examples, LLM models,
+LLM providers, allowed signup domains, and whitelisted e-mail addresses support CRUD.
+Every record can be expanded for its complete contents; lists support pagination,
+search where applicable, and relationship filters. Provider/model and example forms
+accept the IDs visible in their related catalog screens.
+
+Install the additive catalog migration against the shared project before running
+the updated admin app. The command defaults to inspection; `--apply` installs only
+missing catalog tables and verifies their RLS and server-only permissions:
+
+```sh
+npm run admin:catalog-migrate
+npm run admin:catalog-migrate -- --apply
+```
+
+The migration includes a snapshot of the current Factory caption prompt, its step,
+and an initial mix entry. Prompt, mix, provider, and model catalog metadata do not
+replace Factory's deployed prompt or environment configuration. Signup catalogs
+are maintained as data and do not grant superadmin access or change the existing
+Google login policy. No provider credentials are stored in these tables.
+
+Generation requests read the existing `factory_batches` records. New successful
+caption-provider responses are retained in `llm_responses`, linked to the batch;
+logging is bounded to three seconds and failures do not break generation. Existing
+raw responses were never retained and cannot be recovered. Other deployments using
+the same project must adopt the response logging change to retain their responses.
+Image uploads accept JPG/PNG/WebP up to 2 MB, validate and normalize their actual
+bytes, and stay private until published. The existing shared schema classifies
+private admin uploads under the `generated` source. Original-photo links remain
+intact; changing rendered captions continues through Factory.
 
 ## Validation
 

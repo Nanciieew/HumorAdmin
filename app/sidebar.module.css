@@ -53,3 +53,7 @@
 @media(min-width:701px) {
   :global(.app-shell):has(> .sidebar) > :global(.site-content) { grid-column:2; }
 }
+
+/* Keep every admin destination reachable in a tall catalog. */
+.sidebar:global(.app-sidebar) :global(.sidebar-links){overflow-y:auto;min-height:0;flex:1;gap:6px;overscroll-behavior:contain}
+.sidebar:global(.app-sidebar) :global(.sidebar-links) a{flex-shrink:0}

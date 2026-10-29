@@ -6,10 +6,13 @@ import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { Icon } from "./ui";
 import styles from "./sidebar.module.css";
+import { adminResources } from "@/lib/admin/resources";
 
 const adminLinks = [
   { href: "/admin/users", label: "Users and Profiles", icon: "people" as const },
-  { href: "/admin/media", label: "Media", icon: "works" as const },
+  { href: "/admin/media", label: "AI generated media", icon: "works" as const },
+  { href: "/admin/images", label: "Images", icon: "works" as const },
+  ...adminResources.map(resource => ({ href: `/admin/${resource.slug}`, label: resource.label, icon: "works" as const })),
 ];
 const links = [
   { href: "/disguise", label: "Checked Factory", icon: "create" as const },

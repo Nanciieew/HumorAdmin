@@ -55,3 +55,47 @@ test('publishing uses its explicit action; expired sessions return to Google log
   await waitFor(()=>assert.equal(ui.getByRole('button',{name:'Publish'}).disabled,false));
   await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Publish'}));});assert.equal(pushed[0],'/login?next=%2Fadmin%2Fmedia');
 });
+
+const { ResourceConsole } = await import('../app/admin/resource-console.tsx');
+const { findAdminResource } = await import('../lib/admin/resources.ts');
+function mountResource(slug, items=[], total=String(items.length), params='') {
+  return render(React.createElement(AppRouterContext.Provider,{value:{refresh(){refreshed++;},push(path){pushed.push(path);},replace(){},prefetch(){},back(){},forward(){}}},React.createElement(ResourceConsole,{resource:findAdminResource(slug),data:{items,total},params})));
+}
+test('chain details link to steps and mix while remaining read-only',()=>{
+  const ui=mountResource('prompt-chains',[{id:media.id,name:'Factory',description:'Existing workflow',created_at:'2026-10-29'}]);
+  assert.equal(ui.queryByRole('button',{name:'Create record'}),null);assert.equal(ui.queryByRole('button',{name:'Edit'}),null);
+  assert.equal(ui.getByRole('link',{name:'Steps'}).getAttribute('href'),`/admin/prompt-chain-steps?prompt_chain_id=${media.id}`);
+  assert.equal(ui.getByRole('link',{name:'Mix'}).getAttribute('href'),`/admin/prompt-chain-mix?prompt_chain_id=${media.id}`);
+  assert.ok(ui.getByText('View full record'));
+});
+test('mix permits updates without create or delete actions and sends numeric weights',async()=>{
+  const calls=[];globalThis.fetch=async(url,options)=>{calls.push({url,options});return Response.json({id:media.id});};
+  const ui=mountResource('prompt-chain-mix',[{id:media.id,prompt_chain_id:admin.id,weight:1,enabled:true,created_at:'2026-10-29'}]);
+  assert.equal(ui.queryByRole('button',{name:'Create record'}),null);assert.equal(ui.queryByRole('button',{name:'Delete'}),null);
+  fireEvent.click(ui.getByRole('button',{name:'Edit'}));fireEvent.change(ui.getByRole('spinbutton',{name:'Weight'}),{target:{value:'2.5'}});
+  fireEvent.change(ui.getByRole('combobox',{name:'Enabled'}),{target:{value:'false'}});
+  await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Save record'}));});
+  assert.equal(calls[0].options.method,'PATCH');assert.deepEqual(JSON.parse(calls[0].options.body),{weight:2.5,enabled:false});
+});
+test('terms create and delete require explicit form actions; conflicts keep confirmation available',async()=>{
+  let count=0;const calls=[];globalThis.fetch=async(url,options)=>{calls.push({url,options});count++;return count===2?Response.json({error:'This record is still in use.'},{status:409}):Response.json({id:media.id});};
+  const ui=mountResource('terms',[{id:media.id,term:'Wit',definition:'Definition',created_at:'2026-10-29'}]);
+  fireEvent.click(ui.getByRole('button',{name:'Create record'}));
+  fireEvent.change(ui.getByRole('textbox',{name:'Term',exact:true}),{target:{value:'Irony'}});fireEvent.change(ui.getByRole('textbox',{name:'Definition',exact:true}),{target:{value:'A definition'}});
+  await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Save record'}));});
+  assert.equal(calls[0].options.method,'POST');assert.deepEqual(JSON.parse(calls[0].options.body),{term:'Irony',definition:'A definition'});
+  fireEvent.click(ui.getByRole('button',{name:'Delete'}));assert.equal(calls.length,1);
+  await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Permanently delete'}));});
+  assert.ok(ui.getByRole('alert'));assert.ok(ui.getByRole('button',{name:'Permanently delete'}));assert.equal(refreshed,1);
+});
+test('images expose multipart upload and edit details, then refresh after saving',async()=>{
+  const calls=[];globalThis.fetch=async(url,options)=>{calls.push({url,options});return Response.json({id:media.id});};
+  const ui=mount('images');fireEvent.click(ui.getByRole('button',{name:'Upload image'}));
+  fireEvent.change(ui.getByLabelText('Image file'),{target:{files:[new File(['png'],'image.png',{type:'image/png'})]}});
+  fireEvent.change(ui.getByRole('textbox',{name:'Title',exact:true}),{target:{value:'Upload title'}});
+  await act(async()=>{fireEvent.submit(ui.getByRole('button',{name:'Save image'}).closest('form'));});
+  assert.equal(calls[0].url,'/api/admin/media');assert.ok(calls[0].options.body instanceof FormData);assert.equal(calls[0].options.body.get('title'),'Upload title');assert.equal(calls[0].options.headers,undefined);
+  fireEvent.click(ui.getByRole('button',{name:'Edit details'}));fireEvent.change(ui.getByRole('textbox',{name:'Description',exact:true}),{target:{value:'New metadata'}});
+  await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Save details'}));});
+  assert.equal(calls[1].options.method,'PATCH');assert.deepEqual(JSON.parse(calls[1].options.body),{title:media.title,description:'New metadata'});assert.equal(refreshed,2);
+});

@@ -8,7 +8,7 @@ const {supabase}=await import('../lib/supabase.ts');
 const {generateFactoryBatch,publishFactoryBatch,readFactoryBatch,previewFactoryBatch,discardFactoryBatch,cleanupFactoryBatches,factoryPath}=await import('../lib/factory/server.ts');
 const {parseCaptions}=await import('../lib/factory/captions.ts');
 const originalFetch=globalThis.fetch,originalFrom=supabase.from,originalStorage=supabase.storage.from;
-const tables={images:new Map(),factory_batches:new Map()};
+const tables={images:new Map(),factory_batches:new Map(),llm_responses:new Map()};
 const objects=new Map(),removed=[],requests=[];
 let failVariant=-1,failRemove=false;
 const bytes=await sharp({create:{width:400,height:300,channels:3,background:'#aaa'}}).jpeg().toBuffer();
@@ -23,10 +23,11 @@ class Query {
  constructor(table){this.rows=tables[table];this.table=table;assert.ok(this.rows,table);}
  select(){return this;} eq(key,value){this.filters.push(row=>row[key]===value);return this;} is(key,value){return this.eq(key,value);} not(key,_op,value){this.filters.push(row=>row[key]!==value);return this;}
  lt(key,value){this.filters.push(row=>row[key]<value);return this;} gt(key,value){this.filters.push(row=>row[key]>value);return this;} in(key,values){this.filters.push(row=>values.includes(row[key]));return this;}
- order(){return this;} limit(count){this.count=count;return this;} insert(values){this.op='insert';this.values=values;return this;} update(values){this.op='update';this.values=values;return this;} delete(){this.op='delete';return this;}
+ abortSignal(){return this;} order(){return this;} limit(count){this.count=count;return this;} insert(values){this.op='insert';this.values=values;return this;} update(values){this.op='update';this.values=values;return this;} delete(){this.op='delete';return this;}
  run(single=false){
   let rows=[...this.rows.values()].filter(row=>this.filters.every(fn=>fn(row))).slice(0,this.count);
   if(this.op==='insert'){
+   if(this.table==='llm_responses')this.values={id:randomUUID(),...this.values};
    if(this.rows.has(this.values.id)||(this.table==='factory_batches'&&[...this.rows.values()].some(row=>row.user_id===this.values.user_id&&row.state==='generating')))return{data:null,error:{code:'23505'}};
    const row=this.table==='factory_batches'?{state:'generating',variants:[],selected:null,lease_until:null,cleaned_at:null,created_at:new Date().toISOString(),expires_at:new Date(Date.now()+86400000).toISOString(),...this.values}:{published_at:null,original_storage_path:null,created_at:new Date().toISOString(),...this.values};
    this.rows.set(row.id,row);rows=[row];
@@ -62,6 +63,10 @@ test('five captions produce five cached overlays on the unchanged original, with
  assert.deepEqual(result.variants.map(variant=>variant.caption),captions);
  assert.equal(requests.filter(call=>call.provider==='captions').length,1);
  assert.equal(requests.length,1);
+ const [logged]=[...tables.llm_responses.values()];
+ assert.equal(logged.generation_request_id,result.id);assert.equal(logged.model,'fixture-model');
+ assert.deepEqual(JSON.parse(logged.response.candidates[0].content.parts[0].text),{captions});
+ assert.ok(!JSON.stringify(logged).includes('inlineData'));
  const original=await sharp(bytes).ensureAlpha().raw().toBuffer();
  for(let index=0;index<5;index++){
   const cached=objects.get(`generated-images/${factoryPath(owner,result.id,index)}`);
@@ -184,4 +189,12 @@ test('shared Humor Project originals drive regenerated memes and survive repeate
  assert.equal(tables.images.size,1);assert.equal(row.original_storage_path,sourcePath);
  assert.equal(objects.get(`generated-images/${sourcePath}`),storedOriginal);
  assert.deepEqual(storedOriginal,original);
+});
+
+test('a response logging outage does not fail successful caption generation',async()=>{
+ const saved=supabase.from,savedLog=console.error,logs=[];
+ supabase.from=table=>table==='llm_responses'?{insert(){return{abortSignal:async()=>({error:{code:'unavailable'}})}}}:saved(table);
+ console.error=(...args)=>logs.push(args);
+ try{const result=await generate();assert.equal(result.variants.length,5);assert.equal(logs.length,1);assert.deepEqual(logs[0],['Caption response logging failed.']);}
+ finally{supabase.from=saved;console.error=savedLog;}
 });

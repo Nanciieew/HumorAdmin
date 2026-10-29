@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   await requireAdminPage(adminReturnPath((await headers()).get("x-checked-admin-return")) ?? "/admin");
   return <main id="main" className={styles.admin}>
-    <header className={styles.header}><div><p className={styles.eyebrow}>CHECKED / ADMINISTRATION</p><h1>Control room.</h1><p>Manage the media. Read the room.</p></div><span className={styles.badge}>SUPERADMIN</span></header>
+    <header className={styles.header}><div><p className={styles.eyebrow}>CHECKED / ADMINISTRATION</p><h1>Control room.</h1><p>Manage people, prompts, models, and media.</p></div><span className={styles.badge}>SUPERADMIN</span></header>
     {children}
   </main>;
 }

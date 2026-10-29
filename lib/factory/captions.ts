@@ -1,4 +1,5 @@
 import "server-only";
+import { supabase } from "../supabase";
 import { ImageGenerationError } from "../seedream-generation";
 
 export function parseCaptions(value: unknown): string[] {
@@ -10,7 +11,7 @@ export function parseCaptions(value: unknown): string[] {
   if (new Set(clean.map(text => text.toLocaleLowerCase())).size !== 5) throw new ImageGenerationError("The caption model repeated itself. Please try again.", 502);
   return clean;
 }
-export async function generateMemeCaptions(image: string, direction: string, signal?: AbortSignal, shorter = false) {
+export async function generateMemeCaptions(image: string, direction: string, signal?: AbortSignal, shorter = false, requestId?: string) {
   const key = process.env.GEMINI_API_KEY, model = process.env.GEMINI_MODEL;
   if (!key || !model || !/^[a-zA-Z0-9._-]+$/.test(model)) throw new ImageGenerationError("Caption generation is not configured.", 503);
   const match = /^data:(image\/(?:jpeg|png));base64,(.+)$/.exec(image)!;
@@ -39,6 +40,12 @@ Return only JSON: {"captions":[five strings]}.` }] },
   });
   if (!response.ok) throw new ImageGenerationError(response.status === 429 ? "The caption provider is busy or its quota is exhausted. Please try again later." : "Couldn’t generate captions. Please try again.", 502);
   const data = await response.json();
+  // Retain provider output only: never persist API keys or uploaded image bytes.
+  // Logging must not turn a successful generation into a failed user request.
+  try {
+    const saved = await supabase.from("llm_responses").insert({ generation_request_id: requestId ?? null, provider: "Google Gemini", model, response: data }).abortSignal(AbortSignal.timeout(3000));
+    if (saved.error) console.error("Caption response logging failed.");
+  } catch { console.error("Caption response logging failed."); }
   const text = (data.candidates?.[0]?.content?.parts ?? []).filter((part: { thought?: boolean }) => !part.thought).map((part: { text?: string }) => part.text ?? "").join("");
   let parsed;
   try { parsed = JSON.parse(text); } catch { throw new ImageGenerationError("The caption model returned an unreadable response. Please try again.", 502); }

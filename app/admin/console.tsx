@@ -6,7 +6,7 @@ import { useState, useTransition } from "react";
 import type { AdminAccount, AdminMedia, AdminPage } from "@/lib/admin/types";
 import styles from "./admin.module.css";
 
-type Props = { section: "users" | "media"; params: string;
+type Props = { section: "users" | "media" | "images"; params: string;
   data: AdminPage<AdminAccount> | AdminPage<AdminMedia> };
 const date = (value: string | null) => value ? new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" }) : "—";
 const accountName = (user: AdminAccount) => [user.first_name, user.last_name].filter(Boolean).join(" ") || "Awaiting profile";
@@ -15,6 +15,8 @@ export function AdminConsole({ section, params, data }: Props) {
   const query = new URLSearchParams(params), router = useRouter();
   const [busy, setBusy] = useState(false), [pending, startTransition] = useTransition();
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
+  const [editing, setEditing] = useState<AdminMedia | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<AdminMedia | null>(null);
   const locked = busy || pending;
   const page = Number(query.get("page") ?? "1"), limit = Number(query.get("limit") ?? "25");
@@ -41,12 +43,12 @@ export function AdminConsole({ section, params, data }: Props) {
   const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
   return <>
-    <div className={styles.sectionHeading}><h2>{section === "users" ? "Users and Profiles" : "Media"}</h2><span>{BigInt(data.total).toLocaleString("en-US")} records</span></div>
-    <p className={styles.note}>{section === "users" ? "Account and profile information is read-only. Times are shown in New York time." : "View upvotes and downvotes, edit captions, publish private images, or permanently delete saved media. Times are shown in New York time."}</p>
+    <div className={styles.sectionHeading}><h2>{section === "users" ? "Users and Profiles" : section === "images" ? "Images" : "AI generated media"}</h2><span>{BigInt(data.total).toLocaleString("en-US")} records</span></div>
+    <p className={styles.note}>{section === "users" ? "Account and profile information is read-only. Times are shown in New York time." : section === "images" ? "Upload and manage images, edit their details, or change rendered captions in Factory. Times are shown in New York time." : "View upvotes and downvotes, edit captions, publish private images, or permanently delete saved media. Times are shown in New York time."}</p>
 
     <form key={`${section}:${params}`} action={`/admin/${section}`} className={styles.filters} aria-label="Filter records">
       <label>Search<input name="search" defaultValue={query.get("search") ?? ""} maxLength={200} placeholder={section === "users" ? "Email, name or account ID" : "Title, description or media ID"} /></label>
-      {section === "media" && <>
+      {section !== "users" && <>
         <label>Owner ID<input name="owner" defaultValue={query.get("owner") ?? ""} placeholder="Any owner" /></label>
         <label>Source<select name="source" defaultValue={query.get("source") ?? ""}><option value="">All sources</option><option value="generated">Generated</option><option value="upload">Upload</option></select></label>
         <label>Status<select name="status" defaultValue={query.get("status") ?? ""}><option value="">All statuses</option><option value="private">Private</option><option value="published">Published</option></select></label>
@@ -58,6 +60,23 @@ export function AdminConsole({ section, params, data }: Props) {
     {notice && <p role="status" className={styles.notice}>{notice}</p>}
     {busy && <p role="status" className={styles.note}>Working…</p>}
 
+    {section === "images" && <>
+      <button disabled={locked} onClick={() => { setUploading(value => !value); setEditing(null); setError(""); }}>Upload image</button>
+      {uploading && <section className={styles.editor} aria-labelledby="upload-title"><h3 id="upload-title">Upload image</h3><p className={styles.note}>Choose a JPG, PNG, or WebP up to 2 MB. The image stays private until you publish it.</p>
+        <form onSubmit={async event => { event.preventDefault(); const form = new FormData(event.currentTarget); const result = await run("/api/admin/media", { method: "POST", body: form }, "Image uploaded."); if (result) setUploading(false); }}>
+          <fieldset disabled={locked} className={styles.fields}><label>Image file<input type="file" name="file" accept="image/jpeg,image/png,image/webp" required /></label>
+          <label>Title<input name="title" maxLength={100} /></label><label>Description<textarea name="description" maxLength={1000} rows={3} /></label>
+          <label>Owner ID (optional)<input name="owner" placeholder="Defaults to your account" /></label>
+          <div className={styles.rowActions}><button type="submit">{busy ? "Uploading…" : "Save image"}</button><button type="button" onClick={() => setUploading(false)}>Cancel</button></div></fieldset>
+        </form></section>}
+      {editing && <section className={styles.editor} aria-labelledby="edit-image-title"><h3 id="edit-image-title">Edit image details</h3>
+        <form key={editing.id} onSubmit={async event => { event.preventDefault(); const form = new FormData(event.currentTarget); const result = await run(`/api/admin/media/${editing.id}`, json("PATCH", { title: form.get("title"), description: form.get("description") }), "Image details saved."); if (result) setEditing(null); }}>
+          <fieldset disabled={locked} className={styles.fields}><label>Title<input name="title" defaultValue={editing.title} maxLength={100} /></label>
+          <label>Description<textarea name="description" defaultValue={editing.description} maxLength={1000} rows={3} /></label>
+          <div className={styles.rowActions}><button type="submit">Save details</button><button type="button" onClick={() => setEditing(null)}>Cancel</button></div></fieldset>
+        </form></section>}
+    </>}
+
     <div className={styles.tableWrap}><table className={styles.table}>
       <caption className={styles.srOnly}>{section === "users" ? "User accounts and profiles" : "Saved media and vote totals"}</caption>
       <thead><tr>{(section === "users" ? ["Account", "Profile", "Status", "Created"] : ["Preview", "Caption", "Owner & details", "Votes", "Actions"]).map(heading => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
@@ -68,15 +87,15 @@ export function AdminConsole({ section, params, data }: Props) {
           <td>{user.is_superadmin && <span className={styles.badge}>Admin</span>}<small>{user.onboarding_completed_at ? "Onboarding complete" : "Onboarding pending"}</small></td>
           <td>{date(user.account_created_at)}<small>Profile: {date(user.profile_created_at)}</small></td>
         </tr>)}
-        {section === "media" && (data.items as AdminMedia[]).map(media => <tr key={media.id}>
+        {section !== "users" && (data.items as AdminMedia[]).map(media => <tr key={media.id}>
           <td>{/* eslint-disable-next-line @next/next/no-img-element -- Authenticated previews must bypass the public image optimizer. */}
             <img className={styles.preview} src={`/api/admin/media/${media.id}/preview`} alt={media.description || media.title || "Saved media"} width={300} height={240} loading="lazy" /></td>
           <td className={styles.captionCell}><p className={styles.caption}>{media.description || media.title || "No caption"}</p><Link className={styles.changeCaption} href={`/disguise?media=${media.id}`}>Change caption</Link></td>
           <td>{media.owner_name || "Unnamed owner"}<small>{media.source} · {media.published_at ? "Published" : "Private"}</small><small>Created: {date(media.created_at)}</small>{media.published_at && <small>Published: {date(media.published_at)}</small>}</td>
           <td><span>↑ {media.upvotes}</span><small>↓ {media.downvotes}</small></td>
-          <td><div className={styles.rowActions}>{!media.published_at && <button disabled={locked} onClick={() => void run(`/api/admin/media/${media.id}/publish`, { method: "POST" }, "Image published to the gallery.")}>Publish</button>}<button className={styles.danger} disabled={locked} onClick={() => setDeleting(media)}>Delete</button></div></td>
+          <td><div className={styles.rowActions}><a href={`/api/admin/media/${media.id}/preview`} target="_blank" rel="noopener noreferrer">Open image</a>{section === "images" && <button disabled={locked} onClick={() => { setEditing(media); setUploading(false); setError(""); }}>Edit details</button>}{!media.published_at && <button disabled={locked} onClick={() => void run(`/api/admin/media/${media.id}/publish`, { method: "POST" }, "Image published to the gallery.")}>Publish</button>}<button className={styles.danger} disabled={locked} onClick={() => setDeleting(media)}>Delete</button></div></td>
         </tr>)}
-        {data.items.length === 0 && <tr><td colSpan={section === "media" ? 5 : 4}>No matching records.</td></tr>}
+        {data.items.length === 0 && <tr><td colSpan={section !== "users" ? 5 : 4}>No matching records.</td></tr>}
       </tbody>
     </table></div>
     <nav className={styles.pagination} aria-label="Record pages">{page > 1 ? <Link href={pageLink(page - 1)}>← Previous</Link> : <span /> }<span>Page {page}</span>{BigInt(page * limit) < BigInt(data.total) ? <Link href={pageLink(page + 1)}>Next →</Link> : <span />}</nav>

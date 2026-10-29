@@ -43,6 +43,6 @@ export async function adminUploadBody(request: Request) {
 }
 
 export function refreshAdminMedia(id?: string) {
-  for (const path of ["/admin", "/admin/media", "/gallery", "/my-works", "/leaderboard", "/"]) revalidatePath(path);
+  for (const path of ["/admin", "/admin/media", "/admin/images", "/gallery", "/my-works", "/leaderboard", "/"]) revalidatePath(path);
   if (id) revalidatePath(`/my-works/${id}`);
 }

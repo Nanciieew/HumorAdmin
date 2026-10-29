@@ -5,6 +5,7 @@ import { adminSearchParams } from "../search-params";
 
 export default async function MediaPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = adminSearchParams(await searchParams);
+  if (!params.has("source")) params.set("source", "generated");
   await requireAdminPage(`/admin/media${params.size ? `?${params}` : ""}`);
   return <AdminConsole section="media" params={params.toString()} data={await listAdminMedia(params)} />;
 }
