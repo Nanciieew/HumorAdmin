@@ -1,4 +1,5 @@
 import "server-only";
+import { auditedGeneration, readProviderResponse, type GenerationContext } from "./ai/audit";
 import { SEEDREAM_MODEL } from "./seedream";
 import { validateSeedreamReference } from "./seedream-reference";
 import { saveGeneratedImage } from "./gallery-media";
@@ -23,34 +24,37 @@ export async function generateSeedreamImage(userId: string, input: unknown, sign
   const prompt = disguise
     ? `Transform the person in the reference photo into an animated-film or illustrated character. Preserve recognizable facial features, expression and hairstyle. Create a single finished character portrait, without captions or a collage. Follow this creative direction: ${body.prompt.trim()}`
     : body.prompt.trim();
-  const url = await generateSeedreamOutput(prompt, image, signal);
+  const url = await generateSeedreamOutput(prompt, image, signal, { userId, source: disguise ? "character_portrait" : "image_generation" });
   const saved = await saveGeneratedImage(userId, url);
   return { ...saved, model: SEEDREAM_MODEL };
 }
 
 // Raw model output is used by the factory’s private, expiring variant cache.
-export async function generateSeedreamOutput(prompt: string, image?: string, signal?: AbortSignal) {
+export async function generateSeedreamOutput(prompt: string, image: string | undefined, signal: AbortSignal | undefined, context: GenerationContext) {
   const apiKey = process.env.ARK_API_KEY;
   if (!apiKey) throw new ImageGenerationError("Image generation is not configured.", 503);
   const timeout = AbortSignal.timeout(150_000);
-  const response = await fetch("https://ark.cn-beijing.volces.com/api/v3/images/generations", {
-    method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: SEEDREAM_MODEL, prompt, ...(image ? { image } : {}), size: "2K", response_format: "url", watermark: true }),
-    signal: signal ? AbortSignal.any([signal, timeout]) : timeout, cache: "no-store",
+  const payload = { model: SEEDREAM_MODEL, prompt, ...(image ? { image } : {}), size: "2K", response_format: "url", watermark: true };
+  return auditedGeneration({ context, provider: "ByteDance Ark", model: SEEDREAM_MODEL, request: payload }, async capture => {
+    const response = await fetch("https://ark.cn-beijing.volces.com/api/v3/images/generations", {
+      method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout, cache: "no-store",
+    });
+    const result = await readProviderResponse(response, capture);
+    if (!response.ok) {
+      const failure = result;
+      const message = failure?.error?.code === "SetLimitExceeded"
+        ? "The image provider’s account usage limit has been reached. The site owner needs to adjust it in Ark before generation can continue."
+        : response.status === 401 || response.status === 403 ? "Ark rejected access. Check the server API key and model permissions."
+        : response.status === 429 ? "Ark is busy or your quota is exhausted. Please try again later."
+        : "Ark could not generate this image. Try a different prompt or try again later.";
+      throw new ImageGenerationError(message, 502);
+    }
+    const url = result.data?.[0]?.url;
+    let valid = false;
+    try { valid = typeof url === "string" && new URL(url).protocol === "https:"; } catch { /* Invalid provider URL. */ }
+    if (!valid) throw new ImageGenerationError("The model returned no usable image. Please try again.", 502);
+    return url as string;
   });
-  if (!response.ok) {
-    const failure = await response.json().catch(() => null);
-    const message = failure?.error?.code === "SetLimitExceeded"
-      ? "The image provider’s account usage limit has been reached. The site owner needs to adjust it in Ark before generation can continue."
-      : response.status === 401 || response.status === 403 ? "Ark rejected access. Check the server API key and model permissions."
-      : response.status === 429 ? "Ark is busy or your quota is exhausted. Please try again later."
-      : "Ark could not generate this image. Try a different prompt or try again later.";
-    throw new ImageGenerationError(message, 502);
-  }
-  const result = await response.json();
-  const url = result.data?.[0]?.url;
-  let valid = false;
-  try { valid = typeof url === "string" && new URL(url).protocol === "https:"; } catch { /* Invalid provider URL. */ }
-  if (!valid) throw new ImageGenerationError("The model returned no usable image. Please try again.", 502);
-  return url as string;
 }

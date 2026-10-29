@@ -8,7 +8,7 @@ const {supabase}=await import('../lib/supabase.ts');
 const {generateFactoryBatch,publishFactoryBatch,readFactoryBatch,previewFactoryBatch,discardFactoryBatch,cleanupFactoryBatches,factoryPath}=await import('../lib/factory/server.ts');
 const {parseCaptions}=await import('../lib/factory/captions.ts');
 const originalFetch=globalThis.fetch,originalFrom=supabase.from,originalStorage=supabase.storage.from;
-const tables={images:new Map(),factory_batches:new Map(),llm_responses:new Map()};
+const tables={images:new Map(),factory_batches:new Map(),llm_responses:new Map(),generation_requests:new Map()};
 const objects=new Map(),removed=[],requests=[];
 let failVariant=-1,failRemove=false;
 const bytes=await sharp({create:{width:400,height:300,channels:3,background:'#aaa'}}).jpeg().toBuffer();
@@ -37,6 +37,15 @@ class Query {
  }
  single(){return Promise.resolve(this.run(true));}maybeSingle(){return this.single();}then(resolve,reject){return Promise.resolve(this.run()).then(resolve,reject);}
 }
+const originalRpc=supabase.rpc;
+supabase.rpc=(name,args)=>({abortSignal:async()=>{
+ if(name==='record_generation_start'){tables.generation_requests.set(args.p_entry.id,args.p_entry);return{data:args.p_entry.id,error:null};}
+ assert.equal(name,'record_generation_finish');
+ const entry=tables.generation_requests.get(args.p_id);
+ tables.llm_responses.set(args.p_id,{request_id:args.p_id,generation_request_id:entry.factory_batch_id,model:entry.model,response:args.p_result.response});
+ return{data:null,error:null};
+}});
+after(()=>{supabase.rpc=originalRpc;});
 supabase.from=table=>new Query(table);
 supabase.storage.from=bucket=>({
  async upload(path,data){if(path.endsWith(`/${failVariant}.webp`))return{error:{message:'Failed'}};objects.set(`${bucket}/${path}`,Buffer.from(data));return{error:null};},
@@ -191,10 +200,9 @@ test('shared Humor Project originals drive regenerated memes and survive repeate
  assert.deepEqual(storedOriginal,original);
 });
 
-test('a response logging outage does not fail successful caption generation',async()=>{
- const saved=supabase.from,savedLog=console.error,logs=[];
- supabase.from=table=>table==='llm_responses'?{insert(){return{abortSignal:async()=>({error:{code:'unavailable'}})}}}:saved(table);
- console.error=(...args)=>logs.push(args);
- try{const result=await generate();assert.equal(result.variants.length,5);assert.equal(logs.length,1);assert.deepEqual(logs[0],['Caption response logging failed.']);}
- finally{supabase.from=saved;console.error=savedLog;}
+test('a request logging outage prevents the paid call and cleans the batch',async()=>{
+ const saved=supabase.rpc;
+ supabase.rpc=()=>({abortSignal:async()=>({error:{code:'unavailable'}})});
+ try{await assert.rejects(generate(),/logging is unavailable/);assert.equal(requests.length,0);assert.equal(tables.llm_responses.size,0);}
+ finally{supabase.rpc=saved;}
 });

@@ -81,7 +81,7 @@ export async function generateFactoryBatch(userId: string, input: unknown, signa
     // Ask for shorter copy if a caption cannot fit. Never shrink the font,
     // move the caption, or alter the original to accommodate the wording.
     for (let attempt = 0; attempt < 2; attempt++) {
-      captions = manual ? [(body.caption as string).trim()] : await generateMemeCaptions(image, body.direction.trim(), signal, attempt > 0, id);
+      captions = manual ? [(body.caption as string).trim()] : await generateMemeCaptions(image, body.direction.trim(), signal, attempt > 0, { userId, source: "admin_factory", workflow: "factory_captions", factoryBatchId: id, stepPosition: attempt, attempt: attempt + 1 });
       try { images = await renderFactoryMemes(image, captions, signal); break; }
       catch (error) {
         if (!(error instanceof CaptionLayoutError)) throw error;

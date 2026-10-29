@@ -65,3 +65,13 @@ test('CRUD returns rows and conflict errors without leaking database details',as
   result.error=null;assert.equal((await itemRoute.DELETE(request('DELETE',{confirmed:true}),context('terms'))).status,200);
   result.data=null;assert.equal((await itemRoute.PATCH(request('PATCH',{term:'Missing'}),context('terms'))).status,404);
 });
+
+test('generation screens read all AI calls and filter responses using the canonical request ID',async()=>{
+ await server.listResource('generation-requests',new URLSearchParams());
+ assert.deepEqual(calls.find(call=>call[0]==='table'),['table','generation_requests']);
+ assert.ok(calls.find(call=>call[0]==='select')[1].includes('prompt_snapshot'));
+ calls=[];
+ await server.listResource('llm-responses',new URLSearchParams({request_id:id}));
+ assert.deepEqual(calls.find(call=>call[0]==='eq'),['eq','request_id',id]);
+ assert.ok(calls.find(call=>call[0]==='select')[1].includes('duration_ms'));
+});

@@ -22,7 +22,7 @@ export function ResourceConsole({ resource, params, data }: { resource: AdminRes
   const [busy, setBusy] = useState(false), [pending, startTransition] = useTransition();
   const inFlight = useRef(false), locked = busy || pending;
   const page = Number(query.get("page") ?? 1), limit = Number(query.get("limit") ?? 25);
-  const columns = resource.columns.filter(name => !["id", "response", "variants", "system_prompt", "user_prompt", "prompt", "output"].includes(name));
+  const columns = resource.columns.filter(name => !["id", "response", "variants", "system_prompt", "user_prompt", "prompt", "output", "request", "prompt_snapshot", "mix_snapshot", "usage", "error"].includes(name));
   const endpoint = `/api/admin/resources/${resource.slug}`;
   async function mutate(method: string, body: unknown, id?: string) {
     if (inFlight.current || pending) return;
@@ -84,7 +84,7 @@ export function ResourceConsole({ resource, params, data }: { resource: AdminRes
           {resource.mode !== "read" && <button disabled={locked} onClick={() => { setEditor(row); setDeleting(null); setError(""); }}>Edit</button>}
           {resource.mode === "crud" && <button className={styles.danger} disabled={locked} onClick={() => { setDeleting(row); setEditor(null); setError(""); }}>Delete</button>}
           {resource.slug === "prompt-chains" && <><Link href={`/admin/prompt-chain-steps?prompt_chain_id=${row.id}`}>Steps</Link><Link href={`/admin/prompt-chain-mix?prompt_chain_id=${row.id}`}>Mix</Link></>}
-          {resource.slug === "generation-requests" && <Link href={`/admin/llm-responses?generation_request_id=${row.id}`}>LLM responses</Link>}
+          {resource.slug === "generation-requests" && <Link href={`/admin/llm-responses?request_id=${row.id}`}>LLM responses</Link>}
         </div><details className={styles.details}><summary>View full record</summary><dl>{resource.columns.map(name => <div key={name}><dt>{label(name)}</dt><dd><pre>{display(row[name])}</pre></dd></div>)}</dl></details></td>
       </tr>)}{!data.items.length && <tr><td colSpan={columns.length + 1}>No matching records.</td></tr>}</tbody>
     </table></div>

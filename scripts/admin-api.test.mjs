@@ -1,3 +1,4 @@
+import { auditRpcFixture } from "./generation-audit-fixture.mjs";
 import assert from 'node:assert/strict';
 import { after, beforeEach, test } from 'node:test';
 import { randomUUID } from 'node:crypto';
@@ -63,7 +64,7 @@ beforeEach(() => {
   failInsert = false; failStorage = false; salesConflict = false; failDownload = false; ownerComplete = true; providerCalls = 0;
   globalThis.__adminInvalidations = [];
   supabase.from = table => new Query(table);
-  supabase.rpc = async (name, args) => { calls.push({ name, args }); return { data: { items: [], total: '0' }, error: null }; };
+  supabase.rpc = (name, args) => { const audit = auditRpcFixture(name,args); if (audit) return audit; calls.push({ name, args }); return { data: { items: [], total: '0' }, error: null }; };
   supabase.storage.from = bucket => ({
     async upload(path, bytes) { calls.push('storage upload'); objects.set(`${bucket}/${path}`, Buffer.from(bytes)); return { error: null }; },
     async remove(paths) { if (failStorage) return { error: {} }; for (const path of paths) { removed.push(`${bucket}/${path}`); objects.delete(`${bucket}/${path}`); } return { error: null }; },

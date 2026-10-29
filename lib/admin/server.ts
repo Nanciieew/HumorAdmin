@@ -101,7 +101,7 @@ export async function generateAdminMedia(body: unknown, signal?: AbortSignal) {
   const owner = await completedOwner(input.owner, admin.id);
   let downloaded;
   try {
-    const url = await generateSeedreamOutput(input.prompt.trim(), undefined, signal);
+    const url = await generateSeedreamOutput(input.prompt.trim(), undefined, signal, { userId: admin.id, source: "admin_media" });
     downloaded = await fetchGeneratedImage(url, signal);
   } catch (error) {
     if (error instanceof ImageGenerationError) throw new AdminError(error.message, error.status);
