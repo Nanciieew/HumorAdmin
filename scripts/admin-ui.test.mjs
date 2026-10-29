@@ -143,3 +143,23 @@ test('empty audit tables are distinguished from filtered results and filters sur
  assert.equal(ui.getByRole('textbox',{name:'Source'}).value,'getchecked');
  assert.equal(ui.getByRole('link',{name:'Next →'}).getAttribute('href'),'/admin/generation-requests?status=failed&source=getchecked&page=2');
 });
+
+const {Overview}=await import('../app/admin/overview.tsx');
+const {Sidebar}=await import('../app/sidebar.tsx');
+const {PathnameContext}=await import('next/dist/shared/lib/hooks-client-context.shared-runtime.js');
+test('overview shows real zero values, exact large totals, and the New York month and refreshes on demand',async()=>{
+ const data={total_users:'9007199254740993',new_users_this_month:'0',total_memes:'1200',total_egos:'0',month_start:'2026-10-01T04:00:00Z',month_end:'2026-11-01T04:00:00Z',updated_at:'2026-10-29T12:00:00Z'};
+ const ui=render(React.createElement(AppRouterContext.Provider,{value:{refresh(){refreshed++;}}},React.createElement(Overview,{data})));
+ assert.match(ui.getByRole('article',{name:'Total users'}).textContent,/9,007,199,254,740,993/);
+ assert.match(ui.getByRole('article',{name:'New users this month'}).textContent,/0.*October 2026/);
+ assert.match(ui.getByRole('article',{name:'Total memes'}).textContent,/1,200/);
+ assert.match(ui.getByRole('article',{name:'Total egos'}).textContent,/0.*Published ego uploads/);
+ await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'Refresh totals'}));});assert.equal(refreshed,1);
+});
+test('Overview is the first main admin sidebar link and is active only on the overview page',()=>{
+ const mountSidebar=path=>render(React.createElement(PathnameContext.Provider,{value:path},React.createElement(Sidebar,{isAdmin:true})));
+ let ui=mountSidebar('/admin');
+ assert.equal(ui.getByRole('navigation',{name:'Main navigation'}).querySelector('a').getAttribute('href'),'/admin');
+ assert.equal(ui.getByRole('link',{name:'Overview'}).getAttribute('aria-current'),'page');
+ cleanup();ui=mountSidebar('/admin/users');assert.equal(ui.getByRole('link',{name:'Overview'}).getAttribute('aria-current'),null);
+});

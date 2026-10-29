@@ -10,6 +10,8 @@ const { supabase } = await import('../lib/supabase.ts');
 const { AdminError } = await import('../lib/admin/auth.ts');
 const { requireAdminPage } = await import('../lib/admin/page.ts');
 const server = await import('../lib/admin/server.ts');
+const {readAdminOverview}=await import('../lib/admin/overview.ts');
+const overviewRoute=await import('../app/api/admin/overview/route.ts');
 const usersRoute = await import('../app/api/admin/users/route.ts');
 const votesRoute = await import('../app/api/admin/votes/route.ts');
 const mediaRoute = await import('../app/api/admin/media/route.ts');
@@ -84,6 +86,7 @@ const seed = () => { const row = { id, contributor_id: ownerId, source: 'generat
 
 test('all entry points deny anonymous, non-admin, missing-profile, non-Google, revoked, and failed permission lookups before privileged work', async () => {
   const endpoints = [
+    () => overviewRoute.GET(request('/api/admin/overview')),
     () => usersRoute.GET(request('/api/admin/users')), () => votesRoute.GET(request('/api/admin/votes')),
     () => mediaRoute.GET(request('/api/admin/media')), () => mediaRoute.POST(request('/api/admin/media', 'POST', {})),
     () => generateRoute.POST(request('/api/admin/media/generate', 'POST', {})),
@@ -299,4 +302,28 @@ test('generated media stays scoped to generated images while the images page rea
  const page=await ImagesPage({searchParams:Promise.resolve({})});
  assert.equal(page.props.section,'images');
  assert.equal(calls.find(call=>call.name==='admin_media_page').args.p_source,null);
+});
+
+const totals={total_users:'12',new_users_this_month:'3',total_memes:'24',total_egos:'5',month_start:'2026-10-01T04:00:00Z',month_end:'2026-11-01T04:00:00Z',updated_at:'2026-10-29T12:00:00Z'};
+test('overview reads are protected and return exact string counts without public caching',async()=>{
+ flag=false;
+ await assert.rejects(readAdminOverview(),error=>error.status===403);assert.equal(calls.length,0);
+ flag=true;
+ supabase.rpc=(name)=>{calls.push(name);assert.equal(name,'admin_overview');return{data:totals,error:null};};
+ const response=await overviewRoute.GET(request('/api/admin/overview'));
+ assert.equal(response.status,200);assert.deepEqual(await response.json(),totals);
+ assert.equal(response.headers.get('cache-control'),'private, no-store');
+});
+test('overview database failures or invalid counts never masquerade as zero totals',async()=>{
+ for(const result of [{data:null,error:{code:'unavailable'}},{data:{...totals,total_memes:null},error:null},{data:{...totals,total_users:12},error:null}]){
+  supabase.rpc=()=>result;
+  const response=await overviewRoute.GET(request('/api/admin/overview'));
+  assert.equal(response.status,503);assert.match((await response.json()).error,/Unable to load overview totals/);
+ }
+});
+test('the default admin landing page renders overview data and requires admin permission',async()=>{
+ const {default:AdminPage}=await import('../app/admin/page.tsx');
+ supabase.rpc=()=>({data:totals,error:null});
+ const page=await AdminPage();assert.deepEqual(page.props.data,totals);
+ user=null;await assert.rejects(AdminPage(),error=>error.message==='REDIRECT:/login?next=%2Fadmin');
 });

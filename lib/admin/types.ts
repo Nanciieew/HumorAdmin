@@ -13,3 +13,7 @@ export type AdminVote = {
   value?: number; title?: string; target_id?: string; target_name?: string;
 };
 export type AdminPage<T> = { items: T[]; total: string };
+export type AdminOverview = {
+  total_users: string; new_users_this_month: string; total_memes: string; total_egos: string;
+  month_start: string; month_end: string; updated_at: string;
+};

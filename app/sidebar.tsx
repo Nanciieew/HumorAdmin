@@ -46,6 +46,7 @@ const adminGroups: SidebarGroup[] = [
 ];
 
 function isActiveLink(pathname: string, href: string) {
+  if (href === "/admin") return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -97,7 +98,7 @@ export function Sidebar({ children, isAdmin = false }: { children?: ReactNode; i
         <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /><path d={collapsed ? "m13 9 3 3-3 3" : "m16 9-3 3 3 3"} /></svg>
       </button>
     </div>
-    <nav aria-label="Main navigation" className="sidebar-links">{isAdmin && adminGroups.map(group =>
+    <nav aria-label="Main navigation" className="sidebar-links">{isAdmin && <Link href="/admin" aria-label="Overview" title={collapsed ? "Overview" : undefined} aria-current={isActiveLink(pathname, "/admin") ? "page" : undefined} className={isActiveLink(pathname, "/admin") ? "active" : ""}><Icon name="grid" /><span>Overview</span></Link>}{isAdmin && adminGroups.map(group =>
       <NavigationGroup key={`${group.id}:${pathname}`} group={group} pathname={pathname} collapsed={collapsed} expandSidebar={() => setPinnedOpen(true)} />
     )}{links.map((link) => {
       const active = isActiveLink(pathname, link.href);

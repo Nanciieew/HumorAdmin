@@ -26,8 +26,15 @@ for (const [page, rpc, args] of [['users','admin_users_page',{}],['images','admi
     return result.data.total;
   } });
 }
+checks.push({page:'',source:'admin_overview',run:async()=>{
+  const result=await db.rpc('admin_overview');
+  const keys=['total_users','new_users_this_month','total_memes','total_egos'];
+  if(result.error||!result.data||keys.some(key=>typeof result.data[key]!=='string'||!/^\d+$/.test(result.data[key])))throw new Error(`Overview query failed (${result.error?.code??'invalid totals'}).`);
+  const data=result.data;
+  return `${data.total_users} users, ${data.new_users_this_month} new this month, ${data.total_memes} memes, ${data.total_egos} egos`;
+}});
 const results = await Promise.allSettled(checks.map(async check => ({ page: check.page, source: check.source, count: await check.run() })));
 for (const [index, result] of results.entries()) {
-  if (result.status === 'fulfilled') console.log(`/admin/${result.value.page} -> ${result.value.source}: ${result.value.count} records`);
+  if (result.status === 'fulfilled') console.log(`/admin${result.value.page ? "/" + result.value.page : ""} -> ${result.value.source}: ${result.value.count}${result.value.page ? " records" : ""}`);
   else { console.error(`/admin/${checks[index].page}: ${result.reason instanceof Error ? result.reason.message : 'Read check failed.'}`); process.exitCode = 1; }
 }
